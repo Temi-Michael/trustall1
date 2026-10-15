@@ -530,16 +530,20 @@ function PayoutBlock({ profile, setProfile, session }) {
       if (!activeSession?.access_token) throw new Error('Please sign in again before connecting your payout account.')
 
       const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paystack-create-recipient`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paystack-create-subaccount`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${activeSession.access_token}` },
           body: JSON.stringify({ bank_code: bankCode, account_number: accountNumber }),
         }
       )
-      const result = await res.json()
+      const result = await res.json().catch(() => ({}))
       if (!res.ok || !result.success || !result.recipient_code) {
-        throw new Error(result.error || 'The payout setup could not be completed right now.')
+        const message = result.error || `The payout setup could not be completed (HTTP ${res.status}).`
+        const diagnostic = typeof result.diagnostic === 'string'
+          ? result.diagnostic
+          : result.diagnostic ? JSON.stringify(result.diagnostic) : ''
+        throw new Error([message, diagnostic].filter(Boolean).join(' '))
       }
 
       setProfile((currentProfile) => ({ ...currentProfile, paystack_recipient_code: result.recipient_code }))
