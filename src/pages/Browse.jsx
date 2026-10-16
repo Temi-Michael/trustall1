@@ -4,6 +4,7 @@ import { Bookmark, BookmarkCheck, Trash2 } from 'lucide-react'
 import { useProfile } from '../lib/useProfile.js'
 import { supabase } from '../lib/supabaseClient.js'
 import { clearRecentlyViewed, loadRecentlyViewed, loadSavedListingIds, saveListing, unsaveListing } from '../lib/listingFeatures.js'
+import Seo from '../components/Seo.jsx'
 import { recordPromotionEvent } from '../lib/promotions.js'
 
 const NIGERIAN_STATES = [
@@ -302,8 +303,19 @@ export default function Browse() {
     setParams(next)
   }
 
+  const selectedCategoryName = categoryOptions.find((item) => item.id === category)?.name
+  const browseTitle = query
+    ? `Search results for ${query.trim().slice(0, 45)} | Trustall`
+    : selectedCategoryName
+      ? `Shop ${selectedCategoryName} in Nigeria | Trustall`
+      : 'Browse Products and Services in Nigeria | Trustall'
+  const browseDescription = query
+    ? `Search Trustall for ${query.trim().slice(0, 90)}. Find products and services from sellers across Nigeria.`
+    : 'Browse products, digital services and local sellers across Nigeria. Find what you need and pay with Trustall buyer protection.'
+
   return (
     <section className="mx-auto max-w-6xl px-6 py-16">
+      <Seo title={browseTitle} description={browseDescription} path="/browse" noindex={Boolean(query || subcategory || tag || state)} />
       <p className="font-mono text-xs uppercase tracking-widest text-seal">Marketplace</p>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-display text-3xl font-bold text-ink">Browse listings</h1>

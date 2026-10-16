@@ -253,14 +253,14 @@ function AdminHome({ onLogout, email }) {
   return (
     <div className="admin-page min-h-screen bg-[#f3f5f2] text-ink">
       <div className="mx-auto grid min-h-screen max-w-[1600px] lg:grid-cols-[248px_minmax(0,1fr)]">
-        <aside className="hidden border-r border-[#e2e8e2] bg-[#172c25] text-white lg:flex lg:flex-col">
+        <aside className="hidden border-r border-[#e2e8e2] bg-[#172c25] text-white lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:self-start">
           <div className="border-b border-white/10 px-5 py-6">
             <div className="flex items-center gap-3">
               <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#2f6e51] text-white"><ShieldCheck size={21} /></span>
               <div><p className="font-display text-sm font-bold">Trustall</p><p className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.2em] text-white/55">Operations</p></div>
             </div>
           </div>
-          <nav aria-label="Admin sections" className="flex-1 space-y-6 overflow-y-auto px-3 py-5">
+          <nav aria-label="Admin sections" className="min-h-0 flex-1 space-y-6 overflow-y-auto px-3 py-5">
             {ADMIN_SECTIONS.map((group) => (
               <div key={group.group}>
                 <p className="px-3 font-mono text-[9px] uppercase tracking-[0.2em] text-white/40">{group.group}</p>
@@ -284,7 +284,7 @@ function AdminHome({ onLogout, email }) {
         </aside>
 
         <main className="min-w-0">
-          <header className="border-b border-[#e2e8e2] bg-white px-4 py-5 sm:px-7 lg:px-9">
+          <header className="sticky top-0 z-40 border-b border-[#e2e8e2] bg-white/95 px-4 py-5 backdrop-blur sm:px-7 lg:px-9">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="min-w-0">
                 <p className="font-mono text-[9px] uppercase tracking-[0.22em] text-seal">Trustall operations / {currentSection.label}</p>

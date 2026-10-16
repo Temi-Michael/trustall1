@@ -106,13 +106,7 @@ function GlobalSetup() {
 }
 
 function HomeEntry() {
-  const { session, loading } = useProfile()
-
-  if (loading) {
-    return <div className="flex min-h-[60vh] items-center justify-center text-sm text-muted">Checking your account…</div>
-  }
-
-  return session?.user?.id ? <Home /> : <Auth />
+  return <Home />
 }
 
 export default function App() {

@@ -1,0 +1,15 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /auth
+Disallow: /account
+Disallow: /messages
+Disallow: /orders
+Disallow: /disputes
+Disallow: /marketing
+Disallow: /sell
+Disallow: /saved
+Disallow: /forgot-password
+Disallow: /reset-password
+
+Sitemap: https://trustall.online/sitemap.xml

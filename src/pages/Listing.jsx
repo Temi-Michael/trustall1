@@ -6,6 +6,7 @@ import { useSession } from '../lib/useProfile.js'
 import { SealMark } from '../components/Navbar.jsx'
 import { LoadingState, NotFound, DataError } from '../components/ErrorBoundary.jsx'
 import { loadSavedListingIds, saveListing, unsaveListing } from '../lib/listingFeatures.js'
+import Seo from '../components/Seo.jsx'
 import { recordPromotionEvent } from '../lib/promotions.js'
 
 function listingImageUrl(value) {
@@ -338,8 +339,53 @@ export default function Listing() {
   }
 
   const gallery = listing.images || []
+  const listingDescription = String(listing.description || `${listing.title} available from a Trustall seller in Nigeria.`)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 160)
+  const listingImage = Array.isArray(listing.images) ? listing.images[0] : listing.images
+  const listingCanonicalPath = `/listing/${encodeURIComponent(listing.slug || slug)}`
+  const servicePrice = packages.find((item) => item.tier === 'basic')?.price
+  const seoPrice = listing.product_type === 'digital_service' ? servicePrice ?? listing.price : listing.price
+  const listingSchema = listing.product_type === 'digital_service'
+    ? {
+        '@context': 'https://schema.org',
+        '@type': 'Service',
+        name: listing.title,
+        description: listingDescription,
+        serviceType: listing.category || 'Digital service',
+        provider: { '@type': 'Organization', name: listing.seller?.business_name || listing.seller?.handle || 'Trustall seller' },
+        areaServed: { '@type': 'Country', name: 'Nigeria' },
+        url: `https://trustall.online${listingCanonicalPath}`,
+      }
+    : {
+        '@context': 'https://schema.org',
+        '@type': 'Product',
+        name: listing.title,
+        description: listingDescription,
+        image: listingImage ? [listingImageUrl(listingImage)] : undefined,
+        category: listing.category || undefined,
+        offers: {
+          '@type': 'Offer',
+          url: `https://trustall.online${listingCanonicalPath}`,
+          priceCurrency: 'NGN',
+          price: Number(seoPrice || 0),
+          availability: listing.is_active ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+        },
+      }
 
   return (
+    <>
+    <Seo
+      title={`${listing.title} | Buy safely on Trustall`}
+      description={listingDescription}
+      path={listingCanonicalPath}
+      image={listingImage ? listingImageUrl(listingImage) : undefined}
+      type="product"
+      noindex={!listing.is_active || listing.product_type === 'digital_service' && listing.status !== 'published'}
+      structuredData={listingSchema}
+    />
     <section className="mx-auto max-w-4xl px-6 py-16">
       <div className="grid gap-10 md:grid-cols-2">
         <ListingGallery gallery={gallery} />
@@ -415,6 +461,7 @@ export default function Listing() {
         </div>
       </div>
     </section>
+    </>
   )
 }
 

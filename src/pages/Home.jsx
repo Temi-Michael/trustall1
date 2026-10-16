@@ -1,18 +1,20 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowRight, BriefcaseBusiness, Check, ChevronRight, Heart, House, Laptop, Search, ShieldCheck, Shirt, Smartphone, Sparkles, Users, Wrench } from 'lucide-react'
+import { ArrowRight, BookOpen, BriefcaseBusiness, Check, ChevronRight, Dumbbell, Flower2, House, Laptop, Search, ShieldCheck, Shirt, ShoppingBag, Smartphone, Sparkles, Users, Wrench } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient.js'
 import { SealMark } from '../components/Navbar.jsx'
+import Seo from '../components/Seo.jsx'
 import { recordPromotionEvent } from '../lib/promotions.js'
 
 const categories = [
   { label: 'Phones & Gadgets', icon: Smartphone },
-  { label: 'Electronics', icon: Laptop },
   { label: 'Fashion & Style', icon: Shirt },
   { label: 'Home & Living', icon: House },
+  { label: 'Beauty & Personal Care', icon: Flower2 },
+  { label: 'Sports & Outdoors', icon: Dumbbell },
+  { label: 'Digital Products', icon: Laptop },
   { label: 'Services', icon: Wrench },
-  { label: 'Beauty & Personal Care', icon: Heart },
-  { label: 'Freelance Gigs', icon: BriefcaseBusiness },
+  { label: 'Books', icon: BookOpen },
 ]
 
 function imageUrl(value) {
@@ -217,34 +219,62 @@ export default function Home() {
 
   return (
     <div className="bg-white pb-6">
-      <section className="relative isolate overflow-hidden bg-gradient-to-r from-emerald-50 via-white to-blossom/80">
-        <div className="absolute inset-0 -z-10 bg-[linear-gradient(90deg,rgba(236,253,245,.98)_0%,rgba(255,255,255,.94)_46%,rgba(255,241,216,.32)_78%),url('https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1800&q=85')] bg-cover bg-[center_42%]" />
-        <div className="mx-auto grid min-h-[330px] max-w-6xl items-center gap-8 px-5 py-10 sm:px-6 sm:py-14 md:min-h-[370px] md:grid-cols-[1.05fr_.95fr]">
-          <div className="max-w-xl">
-            <p className="font-mono text-[10px] font-bold uppercase tracking-[0.22em] text-emerald-800">Buy <span className="px-1 text-marigold-500">·</span> Sell <span className="px-1 text-marigold-500">·</span> Find services</p>
-            <h1 className="mt-3 font-display text-4xl font-extrabold leading-[1.02] text-slate-950 sm:text-5xl">Everything you need,<br /><span className="text-emerald-700">in one trusted place.</span></h1>
-            <p className="mt-3 max-w-lg text-sm leading-relaxed text-slate-700">Discover quality products, skilled service providers and trusted sellers, all on Trustall.</p>
-            <form onSubmit={submitSearch} className="mt-5 flex max-w-[560px] overflow-hidden rounded-lg border border-emerald-700/20 bg-white shadow-sm focus-within:ring-2 focus-within:ring-emerald-600/30">
-              <label className="flex min-w-0 flex-1 items-center gap-2 px-3"><Search size={16} className="shrink-0 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search products, services, or sellers..." className="min-w-0 flex-1 border-0 bg-transparent py-3 text-xs text-slate-900 outline-none placeholder:text-slate-400" /></label>
-              <button aria-label="Search" className="flex w-12 shrink-0 items-center justify-center bg-emerald-700 text-white transition hover:bg-emerald-800"><Search size={17} /></button>
+      <Seo
+        title="Trustall | Buy and Sell Safely Across Nigeria"
+        description="Shop products, discover digital services and connect with verified sellers across Nigeria. Chat, negotiate and pay with Trustall escrow protection."
+        path="/"
+        image="https://images.unsplash.com/photo-1563013544-824ae1b704d3?auto=format&fit=crop&w=1200&q=85"
+      />
+      <section className="relative overflow-hidden bg-[#eaf8ef]">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_18%_12%,rgba(255,255,255,.9),transparent_48%),linear-gradient(120deg,rgba(221,246,229,.75),rgba(245,251,246,.92)_58%,rgba(226,247,232,.85))]" />
+        <div className="relative mx-auto grid max-w-6xl items-center gap-7 px-4 pb-8 pt-8 sm:px-6 sm:pb-10 sm:pt-10 md:min-h-[430px] md:grid-cols-[1.02fr_.98fr] md:gap-10 md:py-12">
+          <div className="relative z-10 max-w-xl">
+            <p className="inline-flex items-center gap-2 rounded-full border border-emerald-800/10 bg-white/75 px-3 py-1.5 font-mono text-[9px] font-semibold uppercase text-emerald-900 sm:text-[10px]"><ShieldCheck size={13} /> Nigeria’s trusted marketplace</p>
+            <h1 className="mt-4 max-w-[12ch] font-display text-3xl font-extrabold leading-[1.02] text-slate-950 sm:text-5xl md:text-[54px]">Buy &amp; sell safely <span className="text-emerald-700">across Nigeria.</span></h1>
+            <p className="mt-4 max-w-md text-sm leading-relaxed text-slate-700 sm:text-base">Find quality products, digital services and trusted sellers. Chat, agree and pay with secure escrow protection.</p>
+            <form onSubmit={submitSearch} className="mt-5 flex max-w-[520px] overflow-hidden rounded-lg border border-emerald-900/15 bg-white shadow-[0_8px_24px_rgba(20,83,45,.08)] focus-within:ring-2 focus-within:ring-emerald-700/25">
+              <label className="flex min-w-0 flex-1 items-center gap-2.5 px-3.5"><Search size={17} className="shrink-0 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search products, services, digital items..." className="min-w-0 flex-1 border-0 bg-transparent py-3.5 text-xs text-slate-900 outline-none placeholder:text-slate-400 sm:text-sm" /></label>
+              <button aria-label="Search" className="flex w-12 shrink-0 items-center justify-center bg-emerald-800 text-white transition hover:bg-emerald-950 sm:w-[104px] sm:gap-2"><span className="hidden text-xs font-semibold sm:inline">Search</span><Search size={16} /></button>
             </form>
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-slate-600"><span className="font-semibold">Popular:</span>{['iPhone', 'Laptop', 'Fashion', 'Web Design', 'Home Services'].map((term) => <button key={term} type="button" onClick={() => navigate(`/browse?q=${encodeURIComponent(term)}`)} className="rounded-full border border-emerald-100 bg-white/80 px-2.5 py-1 transition hover:border-marigold-300 hover:text-emerald-800">{term}</button>)}</div>
+            <div className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[10px] text-slate-600"><span className="font-semibold">Popular:</span>{['Phones', 'Fashion', 'Web design', 'Home services'].map((term) => <button key={term} type="button" onClick={() => navigate(`/browse?q=${encodeURIComponent(term)}`)} className="underline decoration-emerald-700/20 underline-offset-2 transition hover:text-emerald-800">{term}</button>)}</div>
+            <div className="mt-6 grid grid-cols-3 gap-2 border-t border-emerald-900/10 pt-4">
+              <div className="flex items-center gap-2 text-[10px] font-semibold text-slate-700"><ShieldCheck size={17} className="shrink-0 text-emerald-700" /><span>Escrow protection</span></div>
+              <div className="flex items-center gap-2 text-[10px] font-semibold text-slate-700"><Check size={17} className="shrink-0 text-emerald-700" /><span>Verified sellers</span></div>
+              <div className="flex items-center gap-2 text-[10px] font-semibold text-slate-700"><ShoppingBag size={16} className="shrink-0 text-emerald-700" /><span>Made for Nigeria</span></div>
+            </div>
           </div>
-          <div className="hidden justify-end md:flex">
-            <div className="max-w-[190px] rounded-xl border border-marigold-200 bg-white/90 p-4 shadow-lg shadow-emerald-900/5 backdrop-blur-sm">
-              <div className="flex items-center gap-2"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-marigold-100 text-marigold-700"><ShieldCheck size={22} /></span><div><p className="text-xs font-bold text-slate-900">Buyer protection</p><p className="mt-0.5 text-[10px] leading-snug text-slate-600">Your transactions are safe with Trustall.</p></div></div>
+          <div className="relative mx-auto w-full max-w-[520px] md:max-w-none">
+            <div className="relative aspect-[3.2/1] overflow-hidden rounded-lg bg-emerald-900/10 shadow-[0_24px_60px_rgba(18,75,49,.16)] md:aspect-[1.55/1]">
+              <img src="https://images.unsplash.com/photo-1563013544-824ae1b704d3?auto=format&fit=crop&w=1200&q=85" alt="Secure online shopping and payment on a laptop" className="h-full w-full object-cover object-center" fetchPriority="high" />
+              <div className="absolute inset-0 bg-gradient-to-t from-emerald-950/35 via-transparent to-transparent" />
+              <div className="absolute bottom-3 left-3 flex items-center gap-2 rounded-lg border border-white/70 bg-white/95 px-3 py-2 shadow-lg sm:bottom-5 sm:left-5 sm:gap-3 sm:px-4 sm:py-3"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-emerald-800"><ShieldCheck size={18} /></span><span><span className="block text-[10px] font-bold text-slate-900 sm:text-xs">Trusted sellers</span><span className="mt-0.5 block text-[9px] text-slate-600">Protected from first chat to delivery</span></span></div>
             </div>
           </div>
         </div>
       </section>
 
       <section className="mx-auto max-w-6xl px-4 py-4 sm:px-6">
-        <div className="grid grid-cols-4 gap-2 sm:grid-cols-5 md:grid-cols-7">
+        <div className="grid grid-cols-4 gap-2 sm:grid-cols-4 sm:gap-3 md:grid-cols-8">
           {categories.map(({ label, icon: Icon }) => (
-            <Link key={label} to={`/browse?category=${encodeURIComponent(label)}`} className="group flex min-h-[76px] flex-col items-center justify-center gap-2 rounded-lg border border-slate-100 bg-white px-1 py-3 text-center transition hover:border-emerald-200 hover:bg-emerald-50/60">
-              <Icon size={19} className="text-emerald-700 transition group-hover:scale-110" /><span className="text-[9px] font-semibold leading-tight text-slate-600 sm:text-[10px]">{label}</span>
+            <Link key={label} to={`/browse?category=${encodeURIComponent(label)}`} className="group flex min-h-[78px] min-w-0 flex-col items-center justify-center gap-2 rounded-lg border border-slate-100 bg-white px-1.5 py-3 text-center transition hover:border-emerald-200 hover:bg-emerald-50/60">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-800 transition group-hover:bg-emerald-100"><Icon size={18} /></span><span className="line-clamp-2 text-[9px] font-semibold leading-tight text-slate-600 sm:text-[10px]">{label}</span>
             </Link>
           ))}
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-4 pb-5 sm:px-6">
+        <div className="grid overflow-hidden rounded-lg border border-emerald-100 bg-[#eff9f1] md:grid-cols-[.85fr_1.15fr]">
+          <div className="relative aspect-[2.1/1] overflow-hidden bg-emerald-900/10 md:aspect-auto md:min-h-[250px]">
+            <img src="https://images.unsplash.com/photo-1521737711867-e3b97375f902?auto=format&fit=crop&w=1000&q=82" alt="A professional team collaborating on a business" loading="lazy" className="absolute inset-0 h-full w-full object-cover object-center" />
+          </div>
+          <div className="flex flex-col justify-center p-5 sm:p-7">
+            <p className="font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-emerald-800">For sellers</p>
+            <h2 className="mt-2 max-w-md font-display text-xl font-bold leading-tight text-slate-950 sm:text-2xl">Grow your business with Trustall</h2>
+            <p className="mt-2 max-w-lg text-xs leading-relaxed text-slate-600 sm:text-sm">Reach customers across Nigeria with products, services and digital listings, backed by safer conversations and protected checkout.</p>
+            <div className="mt-4 grid gap-2 text-[10px] font-medium text-slate-700 sm:grid-cols-2 sm:text-xs"><span className="flex items-center gap-2"><Check size={14} className="text-emerald-700" /> Create a seller profile</span><span className="flex items-center gap-2"><Check size={14} className="text-emerald-700" /> List products or services</span><span className="flex items-center gap-2"><Check size={14} className="text-emerald-700" /> Chat with interested buyers</span><span className="flex items-center gap-2"><Check size={14} className="text-emerald-700" /> Promote listings when ready</span></div>
+            <Link to="/sell" className="mt-5 inline-flex min-h-10 w-fit items-center gap-2 rounded-md bg-emerald-800 px-4 text-xs font-semibold text-white transition hover:bg-emerald-950">Become a seller <ArrowRight size={14} /></Link>
+          </div>
         </div>
       </section>
 
@@ -290,13 +320,7 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-6xl gap-3 px-4 py-5 sm:px-6 md:grid-cols-[1fr_190px]">
-        <div className="flex min-h-28 items-center justify-between gap-5 overflow-hidden rounded-lg bg-gradient-to-r from-emerald-900 via-emerald-800 to-emerald-700 px-5 py-5 text-white sm:px-8">
-          <div><p className="font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-marigold-200">Grow your business</p><h2 className="mt-1 font-display text-xl font-bold">Get more visibility with Trustall</h2><p className="mt-1 text-xs text-white/70">Showcase your products and services to more people.</p><Link to="/marketing" className="mt-3 inline-flex items-center gap-1 rounded-full bg-white px-3 py-1.5 text-[10px] font-bold text-emerald-950">Learn more <ArrowRight size={12} /></Link></div>
-          <div className="hidden h-20 w-20 shrink-0 items-center justify-center rounded-full border border-marigold-300/50 bg-emerald-800 sm:flex"><Check size={34} className="text-marigold-200" /></div>
-        </div>
-        <Link to="/sell" className="flex items-center justify-between gap-3 rounded-lg bg-gradient-to-br from-marigold-500 to-marigold-400 p-5 text-emerald-950 transition hover:brightness-105"><span><span className="block text-xs font-bold">For sellers</span><span className="mt-1 block text-[10px] leading-relaxed text-emerald-950/80">Grow your business with targeted exposure on Trustall.</span><span className="mt-3 inline-block rounded-full bg-white px-3 py-1.5 text-[10px] font-bold text-emerald-800">Promote now</span></span><ArrowRight size={18} /></Link>
-      </section>
+      <section className="mx-auto max-w-6xl px-4 py-5 sm:px-6"><div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-emerald-950 px-5 py-4 text-white sm:px-7"><div><p className="font-mono text-[9px] font-bold uppercase tracking-[0.18em] text-emerald-200">Trust &amp; safety</p><h2 className="mt-1 font-display text-lg font-bold">A safer way to find your next deal.</h2></div><Link to="/trust-safety" className="inline-flex min-h-10 items-center gap-2 rounded-md bg-white px-4 text-xs font-semibold text-emerald-950">How it works <ArrowRight size={14} /></Link></div></section>
     </div>
   )
 }

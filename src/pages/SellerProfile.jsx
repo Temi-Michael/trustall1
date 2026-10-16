@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient.js'
 import { useSession } from '../lib/useProfile.js'
 import { SealMark } from '../components/Navbar.jsx'
 import { LoadingState, NotFound, DataError } from '../components/ErrorBoundary.jsx'
+import Seo from '../components/Seo.jsx'
 
 function listingImageUrl(value) {
   if (!value) return ''
@@ -494,8 +495,35 @@ export default function SellerProfile() {
   const salesCount = salesSummary.totalSales || seller.completed_sales_count || 0
   const salesRevenue = Number(salesSummary.totalRevenue || 0)
   const isOwnStorefront = session?.user?.id === seller.id
+  const sellerName = seller.business_name || seller.full_name || 'Trustall seller'
+  const sellerDescription = String(seller.bio || `${sellerName} offers products and services to buyers across Nigeria on Trustall.`)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 160)
+  const sellerPath = `/seller/${encodeURIComponent(seller.handle || identifier)}`
 
   return (
+    <>
+    <Seo
+      title={`${sellerName} | ${seller.verified_seller ? 'Verified seller' : 'Seller'} on Trustall`}
+      description={sellerDescription}
+      path={sellerPath}
+      image={seller.avatar_url || undefined}
+      noindex={seller.status === 'suspended'}
+      structuredData={{
+        '@context': 'https://schema.org',
+        '@type': 'ProfilePage',
+        name: `${sellerName} on Trustall`,
+        description: sellerDescription,
+        url: `https://trustall.online${sellerPath}`,
+        mainEntity: {
+          '@type': seller.business_name ? 'Organization' : 'Person',
+          name: sellerName,
+          ...(seller.avatar_url ? { image: seller.avatar_url } : {}),
+        },
+      }}
+    />
     <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-14">
       <div className="seller-hero overflow-hidden rounded-[28px] border border-seal/20 p-5 sm:p-8">
         <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
@@ -647,5 +675,6 @@ export default function SellerProfile() {
         )}
       </div>
     </section>
+    </>
   )
 }
