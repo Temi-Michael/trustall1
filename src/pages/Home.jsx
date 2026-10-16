@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { ArrowRight, BriefcaseBusiness, Check, ChevronRight, Heart, House, Laptop, Search, ShieldCheck, Shirt, Smartphone, Sparkles, Users, Wrench } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient.js'
 import { SealMark } from '../components/Navbar.jsx'
+import { recordPromotionEvent } from '../lib/promotions.js'
 
 const categories = [
   { label: 'Phones & Gadgets', icon: Smartphone },
@@ -37,16 +38,19 @@ function getTrustScore(listing) {
     + freshness
 }
 
-function ListingTile({ listing, badge }) {
+function ListingTile({ listing, badge, promotion = listing.promotion }) {
   const image = imageUrl(listing.images)
   const price = listing.product_type === 'digital_service' ? listing.basicPrice ?? listing.price : listing.price
   const SellerTrustIcon = listing.seller?.verified_seller ? ShieldCheck : BriefcaseBusiness
   const listingBadge = Number(listing.seller?.completed_sales_count || 0) === 0 ? 'New seller' : badge
+  useEffect(() => {
+    if (promotion?.id) recordPromotionEvent(promotion.id, 'impression', { listing_id: listing.id })
+  }, [promotion?.id, listing.id])
   return (
-    <Link to={`/listing/${listing.slug}`} className="group block min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white transition hover:-translate-y-0.5 hover:border-emerald-700/40 hover:shadow-lg">
+    <Link to={`/listing/${listing.slug}${promotion?.id ? `?promotion=${encodeURIComponent(promotion.id)}` : ''}`} onClick={() => promotion?.id && recordPromotionEvent(promotion.id, 'click', { listing_id: listing.id })} className="group block min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white transition hover:-translate-y-0.5 hover:border-emerald-700/40 hover:shadow-lg">
       <div className="relative aspect-[1.22] overflow-hidden bg-slate-100">
         {image ? <img src={image} alt={listing.title} loading="lazy" className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" /> : <div className="flex h-full items-center justify-center text-slate-300"><BriefcaseBusiness size={34} /></div>}
-        {listingBadge && <span className="absolute left-2 top-2 rounded bg-marigold-500 px-2 py-1 font-mono text-[9px] font-bold uppercase text-emerald-950">{listingBadge}</span>}
+        {(promotion?.id ? 'Promoted' : listingBadge) && <span className="absolute left-2 top-2 rounded bg-marigold-500 px-2 py-1 font-mono text-[9px] font-bold uppercase text-emerald-950">{promotion?.id ? 'Promoted' : listingBadge}</span>}
       </div>
       <div className="p-2.5">
         <p className="truncate text-[11px] font-semibold text-slate-800">{listing.title}</p>
@@ -78,6 +82,7 @@ function ProductSection({ title, subtitle, listings, badge, to = '/browse', icon
 export default function Home() {
   const [listings, setListings] = useState([])
   const [sellers, setSellers] = useState([])
+  const [promotedSellers, setPromotedSellers] = useState([])
   const [loadingMarketplace, setLoadingMarketplace] = useState(true)
   const [marketplaceError, setMarketplaceError] = useState('')
   const [search, setSearch] = useState('')
@@ -89,14 +94,26 @@ export default function Home() {
       setLoadingMarketplace(true)
       setMarketplaceError('')
       try {
-        const [{ data: rows, error: listingsError }, { data: packages }] = await Promise.all([
+        const [{ data: rows, error: listingsError }, { data: packages }, { data: homePromotions }, { data: spotlightPromotions }] = await Promise.all([
           supabase.from('listings').select('id, slug, title, description, category, product_type, status, is_active, images, price, created_at, seller_id').eq('is_active', true).order('created_at', { ascending: false }).range(0, 199),
           supabase.from('service_packages').select('listing_id, tier, price').eq('tier', 'basic'),
+          supabase.from('promotions').select('*').eq('status', 'active').contains('placements', ['homepage_featured']),
+          supabase.from('promotions').select('*').eq('status', 'active').contains('placements', ['seller_spotlight']),
         ])
         if (listingsError) throw listingsError
         if (!active) return
 
-        const sellerIds = [...new Set((rows || []).map((row) => row.seller_id).filter(Boolean))]
+        const promotions = homePromotions || []
+        const spotlightRows = spotlightPromotions || []
+        const listingPromotions = promotions.filter((item) => ['product', 'service'].includes(item.target_type))
+        const rowIds = new Set((rows || []).map((row) => row.id))
+        const missingIds = [...new Set(listingPromotions.map((item) => item.target_id).filter((id) => id && !rowIds.has(id)))]
+        const { data: promotedRows } = missingIds.length
+          ? await supabase.from('listings').select('id, slug, title, description, category, product_type, status, is_active, images, price, created_at, seller_id').in('id', missingIds).eq('is_active', true)
+          : { data: [] }
+        const allRows = [...(rows || []), ...(promotedRows || [])]
+
+        const sellerIds = [...new Set([...allRows.map((row) => row.seller_id), ...spotlightRows.map((item) => item.target_id)].filter(Boolean))]
         const { data: listingSellers, error: sellersError } = sellerIds.length
           ? await supabase.from('profiles').select('id, business_name, full_name, handle, avatar_url, verified_seller, seller_level, pro_vendor, is_seller, status, state, avg_rating, completed_sales_count, created_at').in('id', sellerIds)
           : { data: [], error: null }
@@ -105,9 +122,10 @@ export default function Home() {
 
         const sellerById = new Map((listingSellers || []).map((seller) => [seller.id, seller]))
         const priceByListing = new Map((packages || []).map((row) => [row.listing_id, row.price]))
-        const publicListings = (rows || [])
+        const promotionByListing = new Map(listingPromotions.map((item) => [item.target_id, item]))
+        const publicListings = allRows
           .filter((row) => row.product_type !== 'digital_service' || row.status === 'published')
-          .map((row) => ({ ...row, seller: sellerById.get(row.seller_id), basicPrice: priceByListing.get(row.id) }))
+          .map((row) => ({ ...row, seller: sellerById.get(row.seller_id), basicPrice: priceByListing.get(row.id), promotion: promotionByListing.get(row.id) || null }))
           .filter((row) => row.seller && row.seller.status !== 'suspended')
 
         let rankedOrder = new Map()
@@ -146,6 +164,7 @@ export default function Home() {
             || Number(second.avg_rating || 0) - Number(first.avg_rating || 0))
         setListings(rankedListings)
         setSellers(discoverableSellers)
+        setPromotedSellers(spotlightRows.map((promotion) => ({ promotion, seller: sellerById.get(promotion.target_id) })).filter(({ seller }) => seller && seller.status !== 'suspended'))
       } catch (error) {
         console.error('Trustall marketplace homepage failed to load:', error)
         if (active) {
@@ -161,9 +180,17 @@ export default function Home() {
     return () => { active = false }
   }, [])
 
-  const products = listings.filter((listing) => listing.product_type !== 'digital_service')
-  const services = listings.filter((listing) => listing.product_type === 'digital_service')
-  const newcomerCandidates = listings
+  useEffect(() => {
+    promotedSellers.forEach(({ promotion, seller }) => {
+      recordPromotionEvent(promotion.id, 'impression', { target_id: seller.id })
+    })
+  }, [promotedSellers])
+
+  const promotedListings = listings.filter((listing) => listing.promotion)
+  const organicListings = listings.filter((listing) => !listing.promotion)
+  const products = organicListings.filter((listing) => listing.product_type !== 'digital_service')
+  const services = organicListings.filter((listing) => listing.product_type === 'digital_service')
+  const newcomerCandidates = organicListings
     .filter((listing) => Number(listing.seller?.completed_sales_count || 0) === 0)
     .sort((first, second) => new Date(second.created_at).getTime() - new Date(first.created_at).getTime())
   const newcomerSellerIds = new Set()
@@ -173,7 +200,7 @@ export default function Home() {
     return true
   }).slice(0, 2)
   const featuredSellerIds = new Set(newcomerPicks.map((listing) => listing.seller_id))
-  const rankedEstablishedPicks = listings.filter((listing) => !featuredSellerIds.has(listing.seller_id))
+  const rankedEstablishedPicks = organicListings.filter((listing) => !featuredSellerIds.has(listing.seller_id))
   const featuredListings = [...newcomerPicks, ...rankedEstablishedPicks].slice(0, 5)
   const featuredIds = new Set(featuredListings.map((listing) => listing.id))
   const popularProducts = products.filter((listing) => !featuredIds.has(listing.id)).slice(0, 4)
@@ -224,6 +251,10 @@ export default function Home() {
       {marketplaceError && <p role="alert" className="mx-auto max-w-6xl px-4 py-4 text-sm text-red-700 sm:px-6">{marketplaceError}</p>}
       {loadingMarketplace && listings.length === 0 && <p className="mx-auto max-w-6xl px-4 py-8 text-sm text-slate-500 sm:px-6">Finding trusted listings…</p>}
       {!loadingMarketplace && !marketplaceError && listings.length === 0 && <p className="mx-auto max-w-6xl px-4 py-8 text-sm text-slate-500 sm:px-6">No live listings yet. Check back soon for trusted products and services.</p>}
+
+      {promotedListings.length > 0 && <ProductSection title="Promoted listings" subtitle="Paid placements from Trustall sellers." listings={promotedListings} badge="Promoted" icon={Sparkles} />}
+
+      {promotedSellers.length > 0 && <section className="mx-auto max-w-6xl px-4 py-5 sm:px-6"><h2 className="font-display text-lg font-bold text-slate-900">Seller spotlight</h2><p className="mt-1 text-xs text-slate-500">Promoted storefronts from Trustall sellers.</p><div className="mt-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5">{promotedSellers.map(({ promotion, seller }) => <Link key={promotion.id} to={`/seller/${seller.handle || seller.id}`} onClick={() => recordPromotionEvent(promotion.id, 'click', { target_id: seller.id })} className="rounded-lg border border-marigold-300 bg-white p-3" ><span className="inline-block rounded bg-marigold-500 px-2 py-1 font-mono text-[9px] font-bold uppercase text-emerald-950">Promoted</span><span className="mt-2 block truncate text-sm font-bold text-slate-900">{seller.business_name || seller.full_name || 'Trustall seller'}</span><span className="mt-1 block truncate text-xs text-slate-600">{seller.state || 'Nigeria'}</span></Link>)}</div></section>}
 
       <ProductSection title="Picked for trust" subtitle="Ranked by Trustall signals, with two discovery spots reserved for sellers with no completed sales." listings={featuredListings} badge="Trustall pick" icon={ShieldCheck} />
 

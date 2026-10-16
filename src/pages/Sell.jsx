@@ -106,6 +106,12 @@ export default function Sell() {
             <span className="seller-badge bg-white/15 text-white">{profile.verified_seller ? 'Verified seller' : 'Profile setup'}</span>
             <span className="seller-badge bg-white/10 text-white/90">{profile.handle ? `@${profile.handle}` : 'Complete profile'}</span>
             <Link
+              to="/marketing"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/30 bg-white/10 px-5 py-2.5 font-mono text-xs font-semibold text-white transition hover:bg-white/20 sm:w-auto"
+            >
+              Marketing
+            </Link>
+            <Link
               to={`/seller/${encodeURIComponent(profile.handle || profile.id)}`}
               className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-white px-5 py-2.5 font-mono text-xs font-semibold text-seal transition hover:bg-seal-light sm:w-auto"
             >

@@ -4,6 +4,7 @@ import { Bookmark, BookmarkCheck, Trash2 } from 'lucide-react'
 import { useProfile } from '../lib/useProfile.js'
 import { supabase } from '../lib/supabaseClient.js'
 import { clearRecentlyViewed, loadRecentlyViewed, loadSavedListingIds, saveListing, unsaveListing } from '../lib/listingFeatures.js'
+import { recordPromotionEvent } from '../lib/promotions.js'
 
 const NIGERIAN_STATES = [
   'Abia','Adamawa','Akwa Ibom','Anambra','Bauchi','Bayelsa','Benue','Borno','Cross River',
@@ -53,15 +54,19 @@ function LevelBadge({ level, proVendor }) {
   return null
 }
 
-function ListingCard({ listing, saved, onToggleSave, compact = false }) {
+function ListingCard({ listing, saved, onToggleSave, compact = false, promotion = listing.promotion }) {
   const servicePrice = listing.product_type === 'digital_service' ? listing.basicPackagePrice : null
   const displayPrice = servicePrice ?? listing.price
+  useEffect(() => {
+    if (!compact && promotion?.id) recordPromotionEvent(promotion.id, 'impression', { listing_id: listing.id })
+  }, [compact, promotion?.id, listing.id])
   return (
     <article className={`relative rounded-2xl border border-hairline bg-white ${compact ? 'recently-viewed-card min-w-[150px] p-2.5 sm:min-w-[165px]' : 'p-3 md:p-5'}`}>
-      <Link to={`/listing/${listing.slug}`} className="block">
+      <Link to={`/listing/${listing.slug}${promotion?.id ? `?promotion=${encodeURIComponent(promotion.id)}` : ''}`} onClick={() => promotion?.id && recordPromotionEvent(promotion.id, 'click', { listing_id: listing.id })} className="block">
         <div className={`listing-card-image mb-3 aspect-square overflow-hidden rounded-xl bg-surfacealt ${compact ? '' : 'md:mb-4'}`}>
           {listingImageUrl(firstListingImage(listing.images)) && <img src={listingImageUrl(firstListingImage(listing.images))} alt={listing.title} loading="lazy" className="h-full w-full object-cover" />}
         </div>
+        {promotion?.id && <span className="absolute left-4 top-4 rounded bg-marigold px-2 py-1 font-mono text-[9px] font-bold uppercase text-ink">Promoted</span>}
         <p className="truncate font-mono text-[10px] uppercase tracking-widest text-seal">{listing.product_type === 'digital_service' ? (listing.categoryName || 'Digital service') : listing.category}</p>
         <h3 className={`listing-card-title mt-1 truncate font-display text-sm text-ink ${compact ? '' : 'md:text-base'}`}>{listing.title}</h3>
         <p className={`mt-1 truncate font-mono font-semibold text-ink ${compact ? 'text-[11px]' : 'text-xs md:text-sm'}`}>{listing.product_type === 'digital_service' ? 'From ' : ''}₦{Number(displayPrice || 0).toLocaleString()}</p>
@@ -128,12 +133,18 @@ export default function Browse() {
     const selectedCategory = categoryOptions.find((item) => item.id === category)
     const selectedSubcategory = subcategoryOptions.find((item) => item.id === subcategory)
     const serviceAliasQuery = isServiceLabel(cleanQuery)
-    const [{ data: rows, error: listingError }, { data: categories }, { data: subcategories }, { data: listingTagRows }, { data: tagRows }] = await Promise.all([
+    const relevantPlacements = cleanQuery
+      ? ['search_featured', 'marketplace_featured']
+      : category || subcategory || tag
+        ? ['category_featured', 'marketplace_featured']
+        : ['marketplace_featured']
+    const [{ data: rows, error: listingError }, { data: categories }, { data: subcategories }, { data: listingTagRows }, { data: tagRows }, ...promotionResults] = await Promise.all([
       supabase.from('listings').select('id, seller_id, slug, title, description, category, category_id, subcategory_id, product_type, status, is_active, images, price, created_at').eq('is_active', true).order('created_at', { ascending: false }).range(0, 999),
       supabase.from('categories').select('id, name'),
       supabase.from('subcategories').select('id, category_id, name'),
       supabase.from('listing_tags').select('listing_id, tag_id'),
       supabase.from('tags').select('id, name'),
+      ...relevantPlacements.map((placement) => supabase.from('promotions').select('*').eq('status', 'active').contains('placements', [placement])),
     ])
     if (listingError) {
       console.error('Direct listing discovery failed:', listingError)
@@ -141,6 +152,14 @@ export default function Browse() {
       setLoading(false)
       return
     }
+    const promotions = [...new Map(promotionResults.flatMap((result) => result.data || []).map((promotion) => [promotion.id, promotion])).values()]
+      .filter((promotion) => ['product', 'service'].includes(promotion.target_type))
+    const existingIds = new Set((rows || []).map((row) => row.id))
+    const missingIds = [...new Set(promotions.map((promotion) => promotion.target_id).filter((id) => id && !existingIds.has(id)))]
+    const { data: promotedRows } = missingIds.length
+      ? await supabase.from('listings').select('id, seller_id, slug, title, description, category, category_id, subcategory_id, product_type, status, is_active, images, price, created_at').in('id', missingIds).eq('is_active', true)
+      : { data: [] }
+    const allRows = [...(rows || []), ...(promotedRows || [])]
     const categoryById = new Map((categories || []).map((item) => [item.id, item]))
     const selectedCategoryName = categoryById.get(category)?.name || selectedCategory?.name || category || null
     const { data: rankedRows } = await supabase.rpc('search_listings_ranked', {
@@ -157,17 +176,19 @@ export default function Browse() {
       if (tagName) result[row.listing_id] = [...(result[row.listing_id] || []), tagName]
       return result
     }, {})
-    const sellerIds = [...new Set((rows || []).map((listing) => listing.seller_id).filter(Boolean))]
+    const sellerIds = [...new Set(allRows.map((listing) => listing.seller_id).filter(Boolean))]
     const { data: sellers } = sellerIds.length > 0
       ? await supabase.from('profiles').select('id, business_name, handle, state, verified_seller, seller_level, pro_vendor, completed_sales_count, total_sales_volume, avg_rating, avatar_url').in('id', sellerIds)
       : { data: [] }
     const sellerById = new Map((sellers || []).map((seller) => [seller.id, seller]))
-    const publicRows = (rows || []).filter(isPublicServiceListing).map((listing) => ({
+    const promotionByListing = new Map(promotions.map((promotion) => [promotion.target_id, promotion]))
+    const publicRows = allRows.filter(isPublicServiceListing).map((listing) => ({
       ...listing,
       categoryName: categoryById.get(listing.category_id)?.name || listing.category || '',
       subcategoryName: subcategoryById.get(listing.subcategory_id)?.name || '',
       tagNames: tagsByListing[listing.id] || [],
       seller: sellerById.get(listing.seller_id),
+      promotion: promotionByListing.get(listing.id) || null,
     }))
     const matchingRows = publicRows.filter((listing) => {
       const categoryMatches = !category
@@ -195,7 +216,7 @@ export default function Browse() {
     const results = matchingRows
       .map((listing) => ({ ...listing, basicPackagePrice: basicPriceByListing[listing.id], seller: sellerById.get(listing.seller_id) }))
       .filter((listing) => !state || listing.seller?.state === state)
-      .sort((first, second) => (rankedOrder.get(first.id) ?? Number.MAX_SAFE_INTEGER) - (rankedOrder.get(second.id) ?? Number.MAX_SAFE_INTEGER) || new Date(second.created_at) - new Date(first.created_at))
+      .sort((first, second) => Number(Boolean(second.promotion)) - Number(Boolean(first.promotion)) || (rankedOrder.get(first.id) ?? Number.MAX_SAFE_INTEGER) - (rankedOrder.get(second.id) ?? Number.MAX_SAFE_INTEGER) || new Date(second.created_at) - new Date(first.created_at))
     const pagedResults = results.slice(page * pageSize, page * pageSize + pageSize)
 
     let metrics = {}

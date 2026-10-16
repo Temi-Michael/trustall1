@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { Bookmark, BookmarkCheck } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient.js'
 import { useSession } from '../lib/useProfile.js'
 import { SealMark } from '../components/Navbar.jsx'
 import { LoadingState, NotFound, DataError } from '../components/ErrorBoundary.jsx'
 import { loadSavedListingIds, saveListing, unsaveListing } from '../lib/listingFeatures.js'
+import { recordPromotionEvent } from '../lib/promotions.js'
 
 function listingImageUrl(value) {
   if (!value) return ''
@@ -92,6 +93,7 @@ function ListingGallery({ gallery }) {
 
 export default function Listing() {
   const { slug } = useParams()
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const { session } = useSession()
   const [listing, setListing] = useState(null)
@@ -169,6 +171,11 @@ export default function Listing() {
     loadSavedListingIds(session.user.id).then((ids) => setSaved(ids.has(listing.id)))
   }, [session?.user?.id, listing?.id])
 
+  useEffect(() => {
+    const promotionId = searchParams.get('promotion')
+    if (listing?.id && promotionId) recordPromotionEvent(promotionId, 'view', { listing_id: listing.id })
+  }, [listing?.id, searchParams])
+
   async function toggleSaved() {
     if (!session) {
       navigate(`/auth?redirectTo=${encodeURIComponent(`/listing/${slug}`)}`)
@@ -196,6 +203,8 @@ export default function Listing() {
     try {
       const conversationId = await getOrCreateConversation(listing.id, session.user.id, sellerId)
       if (!conversationId) return
+      const promotionId = searchParams.get('promotion')
+      if (promotionId) await recordPromotionEvent(promotionId, 'message_started', { listing_id: listing.id, conversation_id: conversationId })
       if (withPackageRequest && selectedPackageId) {
         const { error: messageError } = await supabase.from('messages').insert({
           conversation_id: conversationId,
@@ -229,6 +238,8 @@ export default function Listing() {
     try {
       const conversationId = await getOrCreateConversation(listing.id, session.user.id, sellerId)
       if (!conversationId) return
+      const promotionId = searchParams.get('promotion')
+      if (promotionId) await recordPromotionEvent(promotionId, 'message_started', { listing_id: listing.id, conversation_id: conversationId })
 
       const { error: offerError } = await supabase.from('offers').insert({
         conversation_id: conversationId,
