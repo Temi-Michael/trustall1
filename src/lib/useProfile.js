@@ -6,18 +6,37 @@ export function useSession() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    supabase.auth.getSession()
-      .then(({ data }) => setSession(data.session))
-      .catch((error) => {
-        console.warn('Session lookup failed:', error)
-        setSession(null)
-      })
-      .finally(() => setLoading(false))
+    let isMounted = true
+    let receivedAuthEvent = false
     const { data: listener } = supabase.auth.onAuthStateChange((_e, s) => {
+      receivedAuthEvent = true
       setSession(s)
       setLoading(false)
     })
-    return () => listener.subscription.unsubscribe()
+
+    supabase.auth.getSession()
+      .then(({ data, error }) => {
+        if (!isMounted || receivedAuthEvent) return
+        if (error) {
+          console.warn('Session lookup failed:', error)
+          setSession(null)
+        } else {
+          setSession(data.session)
+        }
+      })
+      .catch((error) => {
+        if (!isMounted || receivedAuthEvent) return
+        console.warn('Session lookup failed:', error)
+        setSession(null)
+      })
+      .finally(() => {
+        if (isMounted && !receivedAuthEvent) setLoading(false)
+      })
+
+    return () => {
+      isMounted = false
+      listener.subscription.unsubscribe()
+    }
   }, [])
 
   return { session, loading }
@@ -26,17 +45,21 @@ export function useSession() {
 export function useProfile() {
   const { session, loading: sessionLoading } = useSession()
   const [profile, setProfile] = useState(null)
+  const [profileUserId, setProfileUserId] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (sessionLoading) return
     if (!session) {
       setProfile(null)
+      setProfileUserId(null)
       setLoading(false)
       return
     }
 
     let isMounted = true
+    setProfile(null)
+    setLoading(true)
 
     supabase
       .from('profiles')
@@ -51,11 +74,13 @@ export function useProfile() {
         }
 
         setProfile(data ?? null)
+        setProfileUserId(session.user.id)
       })
       .catch((error) => {
         if (!isMounted) return
         console.error('Profile load failed:', error)
         setProfile(null)
+        setProfileUserId(session.user.id)
       })
       .finally(() => {
         if (isMounted) setLoading(false)
@@ -66,5 +91,12 @@ export function useProfile() {
     }
   }, [session?.user?.id, sessionLoading])
 
-  return { session, profile, setProfile, loading: sessionLoading || loading }
+  const profileMatchesSession = Boolean(session?.user?.id) && profileUserId === session.user.id
+
+  return {
+    session,
+    profile: profileMatchesSession ? profile : null,
+    setProfile,
+    loading: sessionLoading || loading || Boolean(session?.user?.id && !profileMatchesSession),
+  }
 }
