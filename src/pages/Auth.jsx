@@ -3,8 +3,7 @@ import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-do
 import { Eye, EyeOff } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient.js'
 import { useProfile } from '../lib/useProfile.js'
-import { getPublicSiteUrl } from '../lib/authRedirect.js'
-import { buildAuthCallbackUrl, getEmailSignupOutcome, shouldCompleteGoogleSignup } from '../lib/authFlow.js'
+import { buildAuthCallbackUrl, clearAuthIntent, getAuthIntent, getEmailSignupOutcome, saveAuthIntent, shouldCompleteGoogleSignup } from '../lib/authFlow.js'
 
 async function uploadAvatar(file, userId) {
   if (!file || !userId) return null
@@ -36,13 +35,14 @@ export default function Auth() {
   const location = useLocation()
   const [searchParams] = useSearchParams()
   const { session, profile, loading } = useProfile()
-  const redirectTo = location.state?.redirectTo || searchParams.get('redirectTo') || '/'
+  const intent = getAuthIntent(searchParams, typeof window !== 'undefined' ? window.sessionStorage : null)
+  const redirectTo = location.state?.redirectTo || intent.redirectTo
   const refCode = searchParams.get('ref')
-  const authFlow = searchParams.get('authFlow')
-  const isGoogleSignupCompletion = shouldCompleteGoogleSignup(authFlow, session)
+  const isGoogleSignupCompletion = shouldCompleteGoogleSignup(intent.flow, session)
 
   useEffect(() => {
     if (!loading && session?.user?.id && !isGoogleSignupCompletion) {
+      clearAuthIntent(window.sessionStorage)
       navigate(redirectTo, { replace: true })
     }
   }, [loading, session?.user?.id, isGoogleSignupCompletion, redirectTo, navigate])
@@ -53,8 +53,15 @@ export default function Auth() {
     setFullName((current) => current || profile?.full_name || providerName)
   }, [isGoogleSignupCompletion, loading, profile?.full_name, session?.user?.id])
 
+  useEffect(() => {
+    if (!loading && !session?.user?.id) {
+      clearAuthIntent(window.sessionStorage)
+    }
+  }, [loading, session?.user?.id])
+
   async function handleSignIn(e) {
     e.preventDefault()
+    clearAuthIntent(window.sessionStorage)
     setError('')
     setBusy(true)
     const { error } = await supabase.auth.signInWithPassword({ email, password })
@@ -66,13 +73,15 @@ export default function Auth() {
   async function handleGoogleSignIn() {
     setError('')
     setBusy(true)
+    saveAuthIntent(window.sessionStorage, mode, redirectTo)
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: buildAuthCallbackUrl(getPublicSiteUrl(), redirectTo, mode),
+        redirectTo: buildAuthCallbackUrl(window.location.origin, redirectTo, mode),
       },
     })
     if (error) {
+      clearAuthIntent(window.sessionStorage)
       setBusy(false)
       setError(error.message)
     }
@@ -83,6 +92,7 @@ export default function Auth() {
     setError('')
     setInfo('')
     setBusy(true)
+    clearAuthIntent(window.sessionStorage)
 
     try {
       const { data, error } = await supabase.auth.signUp({
@@ -90,7 +100,7 @@ export default function Auth() {
         password,
         options: {
           data: { full_name: fullName, ref_code: refCode || null },
-          emailRedirectTo: buildAuthCallbackUrl(getPublicSiteUrl(), redirectTo),
+          emailRedirectTo: buildAuthCallbackUrl(window.location.origin, redirectTo),
         },
       })
 
@@ -162,6 +172,7 @@ export default function Auth() {
         .single()
 
       if (profileError) throw profileError
+      clearAuthIntent(window.sessionStorage)
       navigate(redirectTo, { replace: true })
     } catch (completionError) {
       console.error('Failed to complete Google signup:', completionError)
@@ -190,7 +201,9 @@ export default function Auth() {
       </h1>
       {isGoogleSignupCompletion && (
         <>
-          <p className="mt-3 text-sm leading-6 text-muted">Confirm your full name to finish setting up your Trustall account. A profile photo is optional.</p>
+          <p className="mt-3 text-sm leading-6 text-muted">
+            Your Google account{session.user.email ? ` (${session.user.email})` : ''} will be used to set up your Trustall profile. Confirm your full name to continue; a profile photo is optional.
+          </p>
           <form onSubmit={handleGoogleSignupCompletion} className="mt-8 space-y-4">
             <label className="block">
               <span className="mb-2 block font-mono text-[10px] uppercase tracking-widest text-muted">Full name</span>

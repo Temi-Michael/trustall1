@@ -2,9 +2,21 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildAuthCallbackUrl,
+  clearAuthIntent,
+  getAuthIntent,
   getEmailSignupOutcome,
+  saveAuthIntent,
   shouldCompleteGoogleSignup,
 } from './authFlow.js'
+
+function createMemoryStorage() {
+  const values = new Map()
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  }
+}
 
 test('auth callback preserves application deep links and nested query strings', () => {
   const callback = new URL(buildAuthCallbackUrl(
@@ -27,6 +39,32 @@ test('Google signup callback preserves explicit signup intent and redirect desti
 
   assert.equal(callback.searchParams.get('authFlow'), 'signup')
   assert.equal(callback.searchParams.get('redirectTo'), '/seller/ada')
+})
+
+test('OAuth intent survives a callback that drops query parameters', () => {
+  const storage = createMemoryStorage()
+  saveAuthIntent(storage, 'signup', '/listing/phone?promotion=featured')
+
+  assert.deepEqual(getAuthIntent(new URLSearchParams(), storage), {
+    flow: 'signup',
+    redirectTo: '/listing/phone?promotion=featured',
+  })
+
+  clearAuthIntent(storage)
+  assert.deepEqual(getAuthIntent(new URLSearchParams(), storage), {
+    flow: 'signin',
+    redirectTo: '/',
+  })
+})
+
+test('callback URL intent takes precedence over stored OAuth intent', () => {
+  const storage = createMemoryStorage()
+  saveAuthIntent(storage, 'signup', '/seller/old')
+
+  assert.deepEqual(getAuthIntent(new URLSearchParams('authFlow=signin&redirectTo=%2Forders'), storage), {
+    flow: 'signin',
+    redirectTo: '/orders',
+  })
 })
 
 test('email signup results distinguish errors, existing accounts, confirmation, and session', () => {
