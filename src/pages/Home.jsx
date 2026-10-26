@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowRight, BookOpen, BriefcaseBusiness, Check, ChevronRight, Dumbbell, Flower2, House, Laptop, Search, ShieldCheck, Shirt, ShoppingBag, Smartphone, Sparkles, Users, Wrench } from 'lucide-react'
+import { ArrowRight, BookOpen, BriefcaseBusiness, Check, ChevronRight, Dumbbell, Flower2, House, Laptop, ShieldCheck, Shirt, ShoppingBag, Smartphone, Sparkles, Users, Wrench } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient.js'
 import { SealMark } from '../components/Navbar.jsx'
 import Seo from '../components/Seo.jsx'
@@ -87,7 +87,6 @@ export default function Home() {
   const [promotedSellers, setPromotedSellers] = useState([])
   const [loadingMarketplace, setLoadingMarketplace] = useState(true)
   const [marketplaceError, setMarketplaceError] = useState('')
-  const [search, setSearch] = useState('')
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -211,12 +210,6 @@ export default function Home() {
     .filter((seller) => Number(seller.completed_sales_count || 0) === 0)
     .sort((first, second) => new Date(second.created_at || 0).getTime() - new Date(first.created_at || 0).getTime())
     .slice(0, 5)
-  const submitSearch = (event) => {
-    event.preventDefault()
-    const value = search.trim()
-    navigate(value ? `/browse?q=${encodeURIComponent(value)}` : '/browse')
-  }
-
   return (
     <div className="bg-white pb-6">
       <Seo
@@ -232,10 +225,6 @@ export default function Home() {
             <p className="inline-flex items-center gap-2 rounded-full border border-emerald-800/10 bg-white/75 px-3 py-1.5 font-mono text-[9px] font-semibold uppercase text-emerald-900 sm:text-[10px]"><ShieldCheck size={13} /> Nigeria’s trusted marketplace</p>
             <h1 className="mt-4 max-w-[12ch] font-display text-3xl font-extrabold leading-[1.02] text-slate-950 sm:text-5xl md:text-[54px]">Buy &amp; sell safely <span className="text-emerald-700">across Nigeria.</span></h1>
             <p className="mt-4 max-w-md text-sm leading-relaxed text-slate-700 sm:text-base">Find quality products, digital services and trusted sellers. Chat, agree and pay with secure escrow protection.</p>
-            <form onSubmit={submitSearch} className="mt-5 flex max-w-[520px] overflow-hidden rounded-lg border border-emerald-900/15 bg-white shadow-[0_8px_24px_rgba(20,83,45,.08)] focus-within:ring-2 focus-within:ring-emerald-700/25">
-              <label className="flex min-w-0 flex-1 items-center gap-2.5 px-3.5"><Search size={17} className="shrink-0 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search products, services, digital items..." className="min-w-0 flex-1 border-0 bg-transparent py-3.5 text-xs text-slate-900 outline-none placeholder:text-slate-400 sm:text-sm" /></label>
-              <button aria-label="Search" className="flex w-12 shrink-0 items-center justify-center bg-emerald-800 text-white transition hover:bg-emerald-950 sm:w-[104px] sm:gap-2"><span className="hidden text-xs font-semibold sm:inline">Search</span><Search size={16} /></button>
-            </form>
             <div className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[10px] text-slate-600"><span className="font-semibold">Popular:</span>{['Phones', 'Fashion', 'Web design', 'Home services'].map((term) => <button key={term} type="button" onClick={() => navigate(`/browse?q=${encodeURIComponent(term)}`)} className="underline decoration-emerald-700/20 underline-offset-2 transition hover:text-emerald-800">{term}</button>)}</div>
             <div className="mt-6 grid grid-cols-3 gap-2 border-t border-emerald-900/10 pt-4">
               <div className="flex items-center gap-2 text-[10px] font-semibold text-slate-700"><ShieldCheck size={17} className="shrink-0 text-emerald-700" /><span>Escrow protection</span></div>

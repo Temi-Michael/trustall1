@@ -117,8 +117,6 @@ function AccountMenu({ profile }) {
 
 const NAV_LINKS = [
   { to: '/how-it-works', label: 'How it works' },
-  { to: '/sell', label: 'For businesses' },
-  { to: '/browse', label: 'Verified businesses' },
   { to: '/sellers', label: 'All sellers' },
   { to: '/trust-safety', label: 'Trust & Safety' },
   { to: '/blog', label: 'Blog' },
