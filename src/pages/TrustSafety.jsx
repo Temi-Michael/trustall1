@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { ChevronDown } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient.js'
 
 const sectionLabels = {
@@ -52,8 +53,11 @@ export default function TrustSafety() {
       ) : (
         <div className="space-y-10">
           {Object.entries(sectionLabels).map(([section, label]) => (
-            <div key={section} className="rounded-3xl border border-hairline bg-white p-6 shadow-sm">
-              <h2 className="font-display text-2xl font-bold text-ink">{label}</h2>
+            <details key={section} className="group rounded-3xl border border-hairline bg-white p-6 shadow-sm">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 [&::-webkit-details-marker]:hidden">
+                <span className="font-display text-2xl font-bold text-ink">{label}</span>
+                <ChevronDown size={20} aria-hidden="true" className="shrink-0 text-muted transition-transform group-open:rotate-180" />
+              </summary>
               <div className="mt-6 space-y-5">
                 {rules[section]?.length ? rules[section].map((rule) => (
                   <article key={rule.id} className="rounded-2xl border border-hairline bg-surfacealt p-4">
@@ -66,7 +70,7 @@ export default function TrustSafety() {
                   <p className="text-sm text-muted">No rules are available for this section yet.</p>
                 )}
               </div>
-            </div>
+            </details>
           ))}
         </div>
       )}
