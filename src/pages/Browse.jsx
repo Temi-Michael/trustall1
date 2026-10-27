@@ -179,7 +179,7 @@ export default function Browse() {
     }, {})
     const sellerIds = [...new Set(allRows.map((listing) => listing.seller_id).filter(Boolean))]
     const { data: sellers } = sellerIds.length > 0
-      ? await supabase.from('profiles').select('id, business_name, handle, state, verified_seller, seller_level, pro_vendor, completed_sales_count, total_sales_volume, avg_rating, avatar_url').in('id', sellerIds)
+      ? await supabase.from('profiles').select('id, business_name, handle, state, verified_seller, seller_level, pro_vendor, completed_sales_count, avg_rating, avatar_url').in('id', sellerIds)
       : { data: [] }
     const sellerById = new Map((sellers || []).map((seller) => [seller.id, seller]))
     const promotionByListing = new Map(promotions.map((promotion) => [promotion.target_id, promotion]))
@@ -227,31 +227,24 @@ export default function Browse() {
       if (!seller?.id) continue
       metrics[seller.id] = {
         count: Number(seller.completed_sales_count || 0),
-        revenue: Number(seller.total_sales_volume || 0),
       }
     }
 
     if (sellerIds.length > 0) {
       const { data: salesRows } = await supabase
         .from('orders')
-        .select('seller_id, status, amount, seller_payout')
+        .select('seller_id')
         .in('seller_id', sellerIds)
         .in('status', ['confirmed', 'complete', 'completed'])
 
+      const completedSalesBySeller = {}
       for (const row of salesRows || []) {
-        const key = row.seller_id
-        const current = metrics[key] || { count: 0, revenue: 0 }
-        const fallbackCount = Number(current.count || 0)
-        const fallbackRevenue = Number(current.revenue || 0)
-        metrics[key] = {
-          count: fallbackCount > 0 ? fallbackCount : 0,
-          revenue: fallbackRevenue > 0 ? fallbackRevenue : 0,
-        }
+        completedSalesBySeller[row.seller_id] = (completedSalesBySeller[row.seller_id] || 0) + 1
+      }
 
-        if (Number(row.seller_payout || row.amount || 0) > 0) {
-          metrics[key].revenue = Math.max(Number(metrics[key].revenue || 0), Number(row.seller_payout || row.amount || 0))
-          metrics[key].count = Math.max(Number(metrics[key].count || 0), 1)
-        }
+      for (const [sellerId, completedSales] of Object.entries(completedSalesBySeller)) {
+        const currentCount = Number(metrics[sellerId]?.count || 0)
+        metrics[sellerId] = { count: Math.max(currentCount, completedSales) }
       }
     }
 
@@ -367,7 +360,7 @@ export default function Browse() {
 
       <div className="listing-grid mt-10 gap-6">
         {listings.map((l) => {
-          const sellerSales = sellerMetrics[l.seller?.id] || { count: 0, revenue: 0 }
+          const sellerSales = sellerMetrics[l.seller?.id] || { count: 0 }
           return (
             <article key={l.id} className="relative rounded-2xl border border-hairline bg-white p-3 transition hover:-translate-y-0.5 hover:border-seal hover:shadow-md md:p-5">
               <Link to={`/listing/${l.slug}`} className="block">
@@ -375,9 +368,8 @@ export default function Browse() {
               <p className="truncate font-mono text-[10px] text-muted md:text-xs">{l.categoryName || l.category || 'Uncategorized'}</p>
               <h3 className="listing-card-title mt-1 truncate font-display text-sm text-ink md:text-base">{l.title}</h3>
               <p className="mt-1 truncate font-mono text-xs font-semibold text-ink md:text-sm">{l.product_type === 'digital_service' ? 'From ' : ''}₦{Number(l.product_type === 'digital_service' ? (l.basicPackagePrice ?? l.price) : l.price || 0).toLocaleString()}</p>
-              <div className="mt-3 flex items-center justify-between gap-1 rounded-xl bg-surfacealt px-2 py-2 md:gap-2 md:px-2.5">
-                <div className="listing-card-stat"><p className="font-mono text-[9px] uppercase tracking-[0.12em] text-muted md:text-[10px] md:tracking-[0.2em]">Sales</p><p className="font-display text-sm font-bold text-ink md:text-lg">{sellerSales.count}</p></div>
-                <div className="listing-card-stat text-right"><p className="font-mono text-[9px] uppercase tracking-[0.12em] text-muted md:text-[10px] md:tracking-[0.2em]">₦ total</p><p className="truncate font-display text-xs font-bold text-ink md:text-sm">{Number(sellerSales.revenue).toLocaleString()}</p></div>
+              <div className="mt-3 rounded-xl bg-surfacealt px-2 py-2 md:px-2.5">
+                <div className="listing-card-stat"><p className="font-mono text-[9px] uppercase tracking-[0.12em] text-muted md:text-[10px] md:tracking-[0.2em]">Total sales</p><p className="font-display text-sm font-bold text-ink md:text-lg">{sellerSales.count}</p></div>
               </div>
               <div className="mt-3 flex min-w-0 items-center gap-2 md:gap-2.5">
                 <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-inksoft font-display text-[10px] font-bold text-surface md:h-10 md:w-10 md:text-xs">
