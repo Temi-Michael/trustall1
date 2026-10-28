@@ -1091,7 +1091,7 @@ function OfferCard({ offer, isSeller, userId, buyerEmail, sellerRecipientCode })
       return
     }
     setPaying(true)
-    // References are issued server-side (TRUST-ORD-XXXXXXXX) and can only be used once.
+    // References are issued server-side (e.g. TRUST-ORD-YBENA62B67JS) and can only be used once.
     const { data: reference, error: referenceError } = await supabase.rpc('issue_order_payment_reference', { p_offer_id: offer.id })
     if (referenceError || !reference) {
       setPaying(false)
