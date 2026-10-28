@@ -20,9 +20,11 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
     }
 
-    const { bank_code, account_number } = await req.json();
-    if (!bank_code || !account_number) {
-      return new Response(JSON.stringify({ error: 'bank_code and account_number are required' }), { status: 400, headers: corsHeaders });
+    const payload = await req.json().catch(() => null);
+    const bank_code = String(payload?.bank_code ?? '').trim();
+    const account_number = String(payload?.account_number ?? '').replace(/\s+/g, '');
+    if (!/^\d{2,6}$/.test(bank_code) || !/^\d{10}$/.test(account_number)) {
+      return new Response(JSON.stringify({ error: 'Select a valid bank and enter a 10-digit account number.' }), { status: 400, headers: corsHeaders });
     }
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);

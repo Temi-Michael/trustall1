@@ -4,10 +4,11 @@ import { Eye, EyeOff } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient.js'
 import { useProfile } from '../lib/useProfile.js'
 import { buildAuthCallbackUrl, clearAuthIntent, getAuthIntent, getEmailSignupOutcome, saveAuthIntent, shouldCompleteGoogleSignup } from '../lib/authFlow.js'
+import { safeFileName } from '../lib/inputSafety.js'
 
 async function uploadAvatar(file, userId) {
   if (!file || !userId) return null
-  const path = `${userId}/${Date.now()}-${file.name}`
+  const path = `${userId}/${Date.now()}-${safeFileName(file.name)}`
   const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true })
   if (error) {
     console.error('Avatar upload error:', error)

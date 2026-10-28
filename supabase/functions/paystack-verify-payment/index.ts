@@ -1,5 +1,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { isUuid } from "../_shared/validate.ts";
+
+// Issued order references: 12-character suffix now, 8 for ones issued earlier.
+const ORDER_REFERENCE = /^TRUST-ORD-(?:[A-HJ-NP-Z2-9]{8}|[A-HJ-NP-Z2-9]{12})$/;
 
 Deno.serve(async (req) => {
   const corsHeaders = {
@@ -20,9 +24,11 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
     }
 
-    const { reference, offer_id } = await req.json();
-    if (!reference || !offer_id) {
-      return new Response(JSON.stringify({ error: 'reference and offer_id are required' }), { status: 400, headers: corsHeaders });
+    const payload = await req.json().catch(() => null);
+    const reference = payload?.reference;
+    const offer_id = payload?.offer_id;
+    if (typeof reference !== 'string' || !ORDER_REFERENCE.test(reference) || !isUuid(offer_id)) {
+      return new Response(JSON.stringify({ error: 'A valid payment reference and offer_id are required' }), { status: 400, headers: corsHeaders });
     }
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);

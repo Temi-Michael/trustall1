@@ -4,6 +4,8 @@ import { Activity, BookOpenText, ChevronDown, CircleDollarSign, ClipboardCheck, 
 import { supabase } from '../lib/supabaseClient.js'
 import { LISTING_CATEGORIES } from '../lib/listingCategories.js'
 import { NIGERIAN_BANKS } from '../lib/nigerianBanks.js'
+import { escapeLikePattern, safeFileName } from '../lib/inputSafety.js'
+import { sanitizeHtml } from '../lib/sanitizeHtml.js'
 
 export default function Admin() {
   const [session, setSession] = useState(null)
@@ -162,7 +164,7 @@ function RichTextEditor({ value, onChange, placeholder = 'Start writing…' }) {
   useEffect(() => {
     if (!editorRef.current) return
     if (editorRef.current.innerHTML !== value) {
-      editorRef.current.innerHTML = value || ''
+      editorRef.current.innerHTML = sanitizeHtml(value)
     }
   }, [value])
 
@@ -615,7 +617,7 @@ function ListingModeration() {
     if (status === 'active') query = query.eq('is_active', true)
     if (status === 'inactive') query = query.eq('is_active', false)
     if (status === 'pending_review') query = query.eq('status', 'pending_review')
-    if (search.trim()) query = query.ilike('title', `%${search.trim()}%`)
+    if (search.trim()) query = query.ilike('title', `%${escapeLikePattern(search.trim())}%`)
     const { data, error: queryError } = await query
     if (queryError) setError(queryError.message)
     setListings(data || []); setLoading(false)
@@ -1028,7 +1030,7 @@ function BlogDashboard() {
     setUploadingCover(true)
     setError('')
 
-    const path = `blog-images/${Date.now()}-${file.name}`
+    const path = `blog-images/${Date.now()}-${safeFileName(file.name)}`
     const { data: uploadData, error: uploadError } = await supabase.storage.from('blog-images').upload(path, file, { upsert: true })
     if (uploadError) {
       setError('Cover image upload failed. Please try again.')

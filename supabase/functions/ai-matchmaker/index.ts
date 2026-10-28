@@ -13,7 +13,8 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json().catch(() => ({}))
-    const query = typeof body.query === 'string' ? body.query.trim() : ''
+    // Cap the prompt so a single request can't run up the AI bill.
+    const query = typeof body?.query === 'string' ? body.query.trim().slice(0, 500) : ''
     const geminiApiKey = Deno.env.get('GEMINI_API_KEY') || Deno.env.get('GOOGLE_API_KEY')
     const openAiApiKey = Deno.env.get('OPENAI_API_KEY')
 

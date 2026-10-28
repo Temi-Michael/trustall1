@@ -568,7 +568,7 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
       if (selectedFiles.length > 0) {
         const rows = []
         for (const [index, file] of selectedFiles.entries()) {
-          const path = `${conversationId}/${Date.now()}_${index}_${file.name.replace(/\s+/g, '_')}`
+          const path = `${conversationId}/${Date.now()}_${index}_${safeFileName(file.name)}`
           const { error: uploadError } = await supabase.storage.from('message-attachments').upload(path, file, { upsert: true })
           if (uploadError) throw uploadError
 

@@ -1,17 +1,34 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
+import { boundedText, escapeHtml } from "../_shared/validate.ts";
 
+// Sends a notification email to the signed-in caller only. The recipient comes
+// from the verified session and the HTML is built here from escaped plain text,
+// so this cannot be used to email arbitrary addresses or arbitrary HTML.
 Deno.serve(async (req) => {
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   };
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
 
   try {
-    const { to, subject, html } = await req.json();
-    if (!to || !subject) {
-      return new Response(JSON.stringify({ error: 'to and subject are required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
+    const userClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: req.headers.get('Authorization') || '' } } }
+    );
+    const { data: { user } } = await userClient.auth.getUser();
+    if (!user?.email) return json({ error: 'Unauthorized' }, 401);
+
+    const payload = await req.json().catch(() => null);
+    const subject = boundedText(payload?.subject, 150);
+    const body = boundedText(payload?.body, 2000);
+    if (!subject || !body) return json({ error: 'subject (max 150 chars) and body (max 2000 chars) are required' }, 400);
 
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -21,15 +38,16 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         from: Deno.env.get('EMAIL_FROM') || 'Trustall <onboarding@resend.dev>',
-        to: [to],
-        subject,
-        html,
+        to: [user.email],
+        subject: subject.replace(/[\r\n]+/g, ' '),
+        html: `<p>${escapeHtml(body)}</p><p>Open your Trustall inbox to view it.</p>`,
       }),
     });
 
-    const data = await response.json();
-    return new Response(JSON.stringify({ success: true, data }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    if (!response.ok) return json({ error: 'Email could not be sent' }, 502);
+    return json({ success: true });
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    console.error('send-notification-email failed', error);
+    return json({ error: 'Email could not be sent' }, 500);
   }
 });

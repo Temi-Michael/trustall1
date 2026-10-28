@@ -7,10 +7,11 @@ import { ensureNotificationPermission, notifyConversationEvent } from '../lib/no
 import { LISTING_CATEGORIES } from '../lib/listingCategories.js'
 import ServiceGigWizard from '../components/ServiceGigWizard.jsx'
 import { NIGERIAN_BANKS } from '../lib/nigerianBanks.js'
+import { safeFileName } from '../lib/inputSafety.js'
 
 async function uploadAvatar(file, userId) {
   if (!file) return null
-  const path = `${userId}/${Date.now()}-${file.name}`
+  const path = `${userId}/${Date.now()}-${safeFileName(file.name)}`
   const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true })
   if (error) {
     console.error('Avatar upload error:', error)
@@ -325,7 +326,8 @@ function ProfileSetup({ profile, setProfile, session }) {
       .upsert({ id: session.user.id, phone: phone.trim(), updated_at: new Date().toISOString() })
     setSaving(false)
     if (contactError) {
-      setError(contactError.message)
+      // 23514: the database's phone format check rejected the number.
+      setError(contactError.code === '23514' ? 'Enter a valid phone number: digits, spaces, + and - only.' : contactError.message)
       return
     }
     setProfile({ ...data, phone: phone.trim() })
@@ -421,7 +423,7 @@ function VerificationBlock({ profile, session }) {
     setSubmitting(true)
     setError('')
 
-    const path = `${session.user.id}/${Date.now()}-${file.name}`
+    const path = `${session.user.id}/${Date.now()}-${safeFileName(file.name)}`
     const { error: uploadError } = await supabase.storage.from('verification-docs').upload(path, file)
     if (uploadError) { setSubmitting(false); setError(uploadError.message); return }
 
@@ -656,7 +658,7 @@ function ListingsBlock({ profile, session }) {
 
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index]
-      const filePath = `${session.user.id}/${listingId}/${Date.now()}_${index}_${file.name.replace(/\s+/g, '_')}`
+      const filePath = `${session.user.id}/${listingId}/${Date.now()}_${index}_${safeFileName(file.name)}`
       const { error: uploadError } = await supabase.storage.from('listing-images').upload(filePath, file, { upsert: true })
       if (uploadError) throw uploadError
       const { data: publicData } = supabase.storage.from('listing-images').getPublicUrl(filePath)
@@ -681,7 +683,7 @@ function ListingsBlock({ profile, session }) {
 
     let imageUrl = null
     if (file) {
-      const path = `${session.user.id}/${Date.now()}-${file.name}`
+      const path = `${session.user.id}/${Date.now()}-${safeFileName(file.name)}`
       const { error: uploadError } = await supabase.storage.from('listing-images').upload(path, file)
       if (uploadError) throw uploadError
       const { data: pub } = supabase.storage.from('listing-images').getPublicUrl(path)
@@ -692,7 +694,7 @@ function ListingsBlock({ profile, session }) {
     if (productType === 'digital_instant') {
       if (!digitalFile && !editingId) throw new Error('Please attach the file buyers will receive.')
       if (digitalFile) {
-        digitalFilePath = `${session.user.id}/${Date.now()}-${digitalFile.name}`
+        digitalFilePath = `${session.user.id}/${Date.now()}-${safeFileName(digitalFile.name)}`
         const { error: digitalUploadError } = await supabase.storage.from('digital-products').upload(digitalFilePath, digitalFile)
         if (digitalUploadError) throw digitalUploadError
       }
@@ -787,7 +789,7 @@ function ListingsBlock({ profile, session }) {
 
     await ensureNotificationPermission()
     await notifyConversationEvent({
-      recipientEmail: session.user.email,
+      emailSelf: true,
       title: editingId ? 'Listing updated' : 'New listing published',
       body: editingId ? 'Your listing has been updated on Trustall.' : 'Your new listing is now live on Trustall.',
       preview: editingId ? 'Your listing has been updated on Trustall.' : 'Your new listing is now live on Trustall.',

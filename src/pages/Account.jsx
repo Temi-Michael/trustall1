@@ -3,10 +3,11 @@ import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { Bookmark, CircleHelp, ClipboardList, Clock3, Upload } from 'lucide-react'
 import { useRole } from '../lib/RoleContext.jsx'
 import { supabase } from '../lib/supabaseClient.js'
+import { safeFileName } from '../lib/inputSafety.js'
 
 async function uploadAvatar(file, userId) {
   if (!file || !userId) return null
-  const path = `${userId}/${Date.now()}-${file.name}`
+  const path = `${userId}/${Date.now()}-${safeFileName(file.name)}`
   const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true })
   if (error) throw error
   return supabase.storage.from('avatars').getPublicUrl(path).data.publicUrl

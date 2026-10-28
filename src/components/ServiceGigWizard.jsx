@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useState } from 'react'
 import { supabase } from '../lib/supabaseClient.js'
+import { escapeLikePattern, safeFileName } from '../lib/inputSafety.js'
 
 const STEP_NAMES = [
   'category', 'title', 'tags', 'description', 'requirements', 'packages',
@@ -196,7 +197,7 @@ export default function ServiceGigWizard({ session, onCancel, onPublished, exist
     const tagNames = state.tags.map((tag) => typeof tag === 'string' ? tag.trim() : tag.name?.trim()).filter(Boolean)
     const tagRows = []
     for (const name of tagNames) {
-      const { data: existingTag, error: tagLookupError } = await supabase.from('tags').select('id, name').ilike('name', name).maybeSingle()
+      const { data: existingTag, error: tagLookupError } = await supabase.from('tags').select('id, name').ilike('name', escapeLikePattern(name)).maybeSingle()
       if (tagLookupError) throw tagLookupError
       let tag = existingTag
       if (!tag) {
@@ -289,7 +290,7 @@ export default function ServiceGigWizard({ session, onCancel, onPublished, exist
       const listingId = await ensureListing()
       const urls = []
       for (const [index, file] of files.entries()) {
-        const path = `${session.user.id}/${listingId}/${Date.now()}_${index}_${file.name.replace(/\s+/g, '_')}`
+        const path = `${session.user.id}/${listingId}/${Date.now()}_${index}_${safeFileName(file.name)}`
         const { error: uploadError } = await supabase.storage.from('listing-images').upload(path, file, { upsert: true })
         if (uploadError) throw uploadError
         const { data } = supabase.storage.from('listing-images').getPublicUrl(path)

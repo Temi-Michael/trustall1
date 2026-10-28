@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient.js'
 import { useProfile } from '../lib/useProfile.js'
+import { safeFileName } from '../lib/inputSafety.js'
 
 export default function DisputePage() {
   const { disputeId } = useParams()
@@ -89,7 +90,7 @@ export default function DisputePage() {
       if (selectedFiles.length > 0) {
         const uploaded = []
         for (const file of selectedFiles) {
-          const safeName = `${Date.now()}_${file.name.replace(/\s+/g, '_')}`
+          const safeName = `${Date.now()}_${safeFileName(file.name)}`
           const path = `dispute-evidence/${disputeId}/${safeName}`
           const { error: uploadError } = await supabase.storage.from('dispute-evidence').upload(path, file, { upsert: true })
           if (uploadError) throw uploadError
