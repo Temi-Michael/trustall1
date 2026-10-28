@@ -127,5 +127,27 @@ How each fixed issue from [issues.md](issues.md) was solved. The numbers match t
 **6.3: Missing `disputes` table**
 - **What changed:** `0020_disputes_table.sql` creates it, with access rules, on a database that doesn't have one. It was rebuilt from how the app uses disputes. On the live database, which already has the table, it does nothing.
 
+## 8. Admin dashboard
+
+**8.1 & 8.2: Dashboard reset when leaving the tab**
+- **What changed:** the admin page only reloads your profile when a different user signs in. The open section is saved in the address (`?section=…`), so a reload keeps your place.
+- **Where:** `Admin.jsx`.
+
+**8.3: Self-published listings**
+- **What changed:** a database guard blocks non-admins from publishing or rejecting listings, setting moderation notes or restoring a listing Trustall removed. New listings always start hidden until approved.
+- **Where:** `0034_admin_tools.sql`, `guard_listing_moderation()`.
+
+**8.4: No audit log**
+- **What changed:** every change an admin makes to profiles, verification, listings, orders, disputes, reports, warnings, promotions, payouts or blog posts is recorded automatically, with who, when and what changed. Nobody can edit the log. It's shown under **Audit log** in the dashboard.
+
+**8.5 & 8.6: Verification reviews**
+- **What changed:** approving or rejecting is one database action (`admin_review_verification`). Rejecting asks for a reason, then deletes the ID document and records when it was deleted.
+
+**8.7: Constant queue reloads**
+- **What changed:** the queue now updates only when a verification request changes.
+
+**8.8: Warnings**
+- **What changed:** issuing a warning is one database action (`admin_issue_warning`), with errors shown to the admin.
+
 **6.4: No migration history**
 - **What changed:** `supabase/all_migrations.sql` records each migration as it runs and skips it next time. You can paste the whole file into the SQL Editor whenever there's something new. See [update.md](update.md).

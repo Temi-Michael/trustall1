@@ -87,6 +87,24 @@ Every problem found in the Trustall codebase during the October 2026 review, fix
 | 6.6 | **Six server functions exist only on Supabase**, not in this repository, so they are unreviewed: `paystack-process-payout`, `paystack-verify-promotion-payment`, `resolve-dispute-refund-buyer`, `paystack-create-platform-recipient`, `paystack-withdraw-platform-earnings` and `moderate-chat-image`. | 🟠 | ⏳ |
 | 6.7 | **Live-only code may now be blocked.** Any of it that changes orders or profiles without elevated rights will be refused by the new rules, and so will any that reads profiles with `select('*')` or reads a hidden field such as `wallet_cleared`. Filing a dispute and withdrawing from the wallet should be tested in particular. | 🟡 | ⏳ |
 
+## 8. Admin dashboard
+
+| # | Issue | Level | Status |
+|---|---|---|---|
+| 8.1 | **Leaving the tab reset the dashboard to the overview.** Supabase refreshes the login on tab focus, and the admin page blanked and reloaded itself each time. | 🟡 | ✅ |
+| 8.2 | **The open section wasn't kept in the URL**, so any reload lost your place. | ⚪ | ✅ |
+| 8.3 | **Sellers could publish their own listings** by setting the status to "published" directly, skipping admin approval. | 🟠 | ✅ |
+| 8.4 | **There was no audit log** of admin actions. | 🟡 | ✅ |
+| 8.5 | **Verification approvals were two separate saves with no error checks**, so a request could show "approved" while the seller never got the badge. Rejections had no reason. | 🟡 | ✅ |
+| 8.6 | **Rejected ID documents were kept forever.** | 🟡 | ✅ |
+| 8.7 | **The verification queue reloaded every 3.5 seconds**, and on every profile change, regenerating document links each time. | ⚪ | ✅ |
+| 8.8 | **Issuing a warning was three separate saves with no error checks.** | 🟡 | ✅ |
+| 8.9 | **There's no user detail view.** The people directory only shows name cards and loads at most 500 profiles. The database functions for search and details exist (`admin_search_users`, `admin_get_user_details`), but no screen uses them yet. | 🟡 | ⏳ |
+| 8.10 | **Admins can't create promotions.** Sellers create them on the Marketing page; admins can only approve, pause or stop them. | ⚪ | ⏳ |
+| 8.11 | **The promotions screen loads every profile and listing** just to show names. | ⚪ | ⏳ |
+| 8.12 | **Verification history is hidden.** The queue only shows pending requests; approved and rejected ones aren't listed, and sellers aren't shown the rejection reason. | ⚪ | ⏳ |
+| 8.13 | **Some admin actions still save without checking for errors**, such as listing removal and judge toggles. | ⚪ | ⏳ |
+
 ## 7. Housekeeping
 
 | # | Issue | Level | Status |

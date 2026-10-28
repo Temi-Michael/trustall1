@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Activity, BookOpenText, ChevronDown, CircleDollarSign, ClipboardCheck, FileWarning, LayoutDashboard, Megaphone, Pause, Play, Scale, Search, ShieldCheck, Store, Users, Wallet, X } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient.js'
 import { LISTING_CATEGORIES } from '../lib/listingCategories.js'
@@ -18,11 +18,20 @@ export default function Admin() {
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
 
+  // Supabase re-emits auth events (token refresh, SIGNED_IN) whenever the tab
+  // regains focus. Only a different user should reload the profile; otherwise
+  // the dashboard would unmount and lose its place.
+  const loadedUserIdRef = useRef(null)
+
   useEffect(() => {
     async function hydrateSession(nextSession) {
       setSession(nextSession)
 
-      if (!nextSession?.user?.id) {
+      const nextUserId = nextSession?.user?.id || null
+      if (nextUserId && nextUserId === loadedUserIdRef.current) return
+      loadedUserIdRef.current = nextUserId
+
+      if (!nextUserId) {
         setProfile(null)
         setProfileLoading(false)
         setChecking(false)
@@ -217,6 +226,7 @@ const ADMIN_SECTIONS = [
     { id: 'reports', label: 'Reports & moderation', icon: FileWarning, title: 'Reports & moderation', description: 'Review reports and manage marketplace safety.' },
     { id: 'disputes', label: 'Disputes', icon: Scale, title: 'Dispute resolution', description: 'Investigate and resolve buyer and seller cases.' },
     { id: 'listings', label: 'Listings', icon: Store, title: 'Listing moderation', description: 'Review listings and manage marketplace visibility.' },
+    { id: 'audit', label: 'Audit log', icon: ClipboardCheck, title: 'Audit log', description: 'Every change made by an admin, with who made it and when.' },
   ] },
   { group: 'Finance & people', items: [
     { id: 'payouts', label: 'Pending payouts', icon: Wallet, title: 'Pending payouts', description: 'Review payout requests and transfer status.' },
@@ -232,8 +242,15 @@ const ADMIN_SECTIONS = [
   ] },
 ]
 
+const ADMIN_SECTION_IDS = new Set(ADMIN_SECTIONS.flatMap((group) => group.items.map((item) => item.id)))
+
 function AdminHome({ onLogout, email }) {
-  const [tab, setTab] = useState('overview')
+  // The open section lives in the URL (?section=...), so a reload or a shared
+  // link reopens the same place instead of the overview.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedSection = searchParams.get('section')
+  const tab = ADMIN_SECTION_IDS.has(requestedSection) ? requestedSection : 'overview'
+  const setTab = (id) => setSearchParams(id === 'overview' ? {} : { section: id })
   const [mobileSectionsOpen, setMobileSectionsOpen] = useState(false)
   const currentSection = ADMIN_SECTIONS.flatMap((group) => group.items).find((item) => item.id === tab) || ADMIN_SECTIONS[0].items[0]
   const renderPanel = () => {
@@ -249,6 +266,7 @@ function AdminHome({ onLogout, email }) {
     if (tab === 'payouts') return <PendingPayouts />
     if (tab === 'earnings') return <TrustallEarnings />
     if (tab === 'blog') return <BlogDashboard />
+    if (tab === 'audit') return <AuditLog />
     return <ServiceCatalogManager />
   }
 
@@ -1218,6 +1236,44 @@ function BlogDashboard() {
   )
 }
 
+function AuditLog() {
+  const [entries, setEntries] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    supabase.from('admin_audit_log').select('id, action, table_name, record_id, changes, created_at, actor:actor_id(full_name, business_name)')
+      .order('created_at', { ascending: false }).limit(200)
+      .then(({ data, error: queryError }) => {
+        if (queryError) setError(queryError.message)
+        setEntries(data || [])
+        setLoading(false)
+      })
+  }, [])
+
+  return (
+    <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+      <p className="font-mono text-[10px] uppercase tracking-widest text-seal">Accountability</p>
+      <h1 className="mt-2 font-display text-2xl font-bold text-ink">Audit log</h1>
+      <p className="mt-1 text-sm text-muted">The latest 200 changes made by admins. Entries are written by the database and can't be edited.</p>
+      {error && <p className="mt-4 text-sm text-marigold-deep">{error}</p>}
+      {loading && <p className="mt-6 text-sm text-muted">Loading audit log…</p>}
+      {!loading && !error && entries.length === 0 && <p className="mt-6 rounded-xl border border-hairline bg-white p-5 text-sm text-muted">No admin changes recorded yet.</p>}
+      <div className="mt-5 space-y-2">
+        {entries.map((entry) => (
+          <article key={entry.id} className="rounded-xl border border-hairline bg-white p-4 text-sm">
+            <p className="font-semibold text-ink">
+              {entry.actor?.business_name || entry.actor?.full_name || 'Unknown admin'} · {entry.action} · {entry.table_name}
+            </p>
+            <p className="mt-1 font-mono text-[11px] text-muted">{new Date(entry.created_at).toLocaleString()} · record {entry.record_id || '—'}</p>
+            <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-surfacealt p-2 font-mono text-[11px] text-ink">{JSON.stringify(entry.changes, null, 2)}</pre>
+          </article>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 function VerificationQueue() {
   const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
@@ -1228,19 +1284,15 @@ function VerificationQueue() {
   useEffect(() => {
     loadRequests()
 
-    const interval = window.setInterval(() => {
-      loadRequests()
-    }, 3500)
-
+    // Realtime alone keeps the queue current; polling and profile updates
+    // (which fire on every presence ping) caused constant reloads.
     const channel = supabase
       .channel('admin-verification-queue')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'verification_requests' }, loadRequests)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'verification_requests' }, loadRequests)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, loadRequests)
       .subscribe()
 
     return () => {
-      window.clearInterval(interval)
       supabase.removeChannel(channel)
     }
   }, [])
@@ -1288,17 +1340,25 @@ function VerificationQueue() {
   }
 
   async function decide(request, approve) {
+    const reason = approve ? null : window.prompt('Why is this request rejected? The seller will see this.')
+    if (!approve && !reason?.trim()) return
     setBusyId(request.id)
-    const { data: { user } } = await supabase.auth.getUser()
 
-    await supabase.from('verification_requests').update({
-      status: approve ? 'approved' : 'rejected',
-      reviewed_by: user.id,
-      reviewed_at: new Date().toISOString(),
-    }).eq('id', request.id)
+    // One database call updates the request and the seller's badge together.
+    const { data, error } = await supabase.rpc('admin_review_verification', {
+      p_request_id: request.id, p_approve: approve, p_reason: reason,
+    })
+    if (error || !data?.success) {
+      setBusyId(null)
+      alert(error?.message || data?.error || 'This request could not be reviewed.')
+      return
+    }
 
-    if (approve) {
-      await supabase.from('profiles').update({ verified_seller: true, seller_level: 1 }).eq('id', request.seller_id)
+    // Rejected ID documents aren't kept: delete the file, then record that it's gone.
+    if (!approve && data.document_path) {
+      const { error: removeError } = await supabase.storage.from('verification-docs').remove([data.document_path])
+      if (removeError) alert(`Rejected, but the document could not be deleted: ${removeError.message}`)
+      else await supabase.from('verification_requests').update({ document_deleted_at: new Date().toISOString() }).eq('id', request.id)
     }
 
     setRequests((prev) => prev.filter((r) => r.id !== request.id))
@@ -1679,18 +1739,9 @@ function ReportsQueue() {
 
   async function issueWarning(report) {
     setBusyId(report.id)
-    const newCount = (report.reported.warning_count || 0) + 1
-    const shouldSuspend = newCount >= 3
-
-    await supabase.from('account_warnings').insert({
-      profile_id: report.reported.id,
-      reason: `${report.reason}${report.details ? ' — ' + report.details : ''}`,
-    })
-    await supabase.from('profiles').update({
-      warning_count: newCount,
-      status: shouldSuspend ? 'suspended' : 'warned',
-    }).eq('id', report.reported.id)
-    await supabase.from('reports').update({ status: 'resolved' }).eq('id', report.id)
+    // Records the warning, updates the count/suspension and closes the report in one step.
+    const { data, error } = await supabase.rpc('admin_issue_warning', { p_report_id: report.id })
+    if (error || !data?.success) alert(error?.message || data?.error || 'The warning could not be issued.')
 
     setBusyId(null)
     loadReports()

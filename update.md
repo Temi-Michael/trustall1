@@ -83,7 +83,14 @@ Users can hide their money amounts, like in a banking app. An eye button next to
 grant select (new_column) on public.profiles to anon, authenticated;
 ```
 
-## 5. Rolling this out
+## 5. Admin tools (migration 0034)
+
+- **Audit log section:** lists the latest 200 admin changes.
+- **Verification:** rejection reasons are stored in `rejection_reason`, and rejected documents are deleted, with the time recorded in `document_deleted_at`.
+- **Bookmarkable sections:** dashboard sections can be linked directly, e.g. `/admin?section=verification`.
+- **User lookup functions (no screen yet):** `admin_search_users(query, filter)` searches by name, handle, email or ID. `admin_get_user_details(user_id)` returns a user's email, phone, sign-in dates, listings, orders, verification history, warnings and reports.
+
+## 6. Rolling this out
 
 1. **Database:** paste `supabase/all_migrations.sql` into the Supabase SQL Editor and click **Run**.
 2. **Server functions:** deploy the changed ones:
