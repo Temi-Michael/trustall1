@@ -36,8 +36,9 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: uploadError.message || String(uploadError) }), { status: 500, headers: corsHeaders });
     }
 
-    const { data } = admin.storage.from('message-attachments').getPublicUrl(filename);
-    return new Response(JSON.stringify({ publicUrl: data?.publicUrl || null }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    // The bucket is private, so callers get the storage path plus a short-lived signed URL.
+    const { data } = await admin.storage.from('message-attachments').createSignedUrl(filename, 60 * 60);
+    return new Response(JSON.stringify({ path: filename, signedUrl: data?.signedUrl || null }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err: any) {
     console.error('upload-proxy error', err?.message || err);
     return new Response(JSON.stringify({ error: err?.message || String(err) }), { status: 500, headers: corsHeaders });

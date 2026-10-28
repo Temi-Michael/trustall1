@@ -1153,16 +1153,10 @@ export function OrderDetails() {
 
     setSellerDelivering(true)
     try {
-      const { error } = await supabase
-        .from('orders')
-        .update({
-          fulfilled_at: new Date().toISOString(),
-          status: 'fulfilled',
-        })
-        .eq('id', order.id)
-        .eq('seller_id', session.user.id)
+      const { data, error } = await supabase.rpc('mark_order_fulfilled', { p_order_id: order.id })
 
       if (error) throw error
+      if (!data?.success) throw new Error(data?.error || 'Failed to mark as delivered.')
 
       setOrder((current) => ({
         ...current,

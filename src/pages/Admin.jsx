@@ -1220,6 +1220,7 @@ function VerificationQueue() {
   const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
   const [docUrls, setDocUrls] = useState({})
+  const [revealedIds, setRevealedIds] = useState({})
   const [busyId, setBusyId] = useState(null)
 
   useEffect(() => {
@@ -1247,7 +1248,7 @@ function VerificationQueue() {
 
     const { data, error } = await supabase
       .from('verification_requests')
-      .select('*, seller_profile:seller_id(full_name, business_name, phone, verified_seller, status, seller_level)')
+      .select('*, seller_profile:seller_id(full_name, business_name, verified_seller, status, seller_level, profile_contacts(phone))')
       .eq('status', 'pending')
       .order('created_at', { ascending: true })
 
@@ -1272,6 +1273,16 @@ function VerificationQueue() {
       if (signed) urls[r.id] = signed.signedUrl
     }
     setDocUrls(urls)
+  }
+
+  // ID numbers are encrypted at rest; only admins can decrypt them, one request at a time.
+  async function revealIdNumber(request) {
+    const { data, error } = await supabase.rpc('reveal_verification_id_number', { p_request_id: request.id })
+    if (error) {
+      alert(error.message || 'Unable to reveal this ID number.')
+      return
+    }
+    setRevealedIds((prev) => ({ ...prev, [request.id]: data || 'not provided' }))
   }
 
   async function decide(request, approve) {
@@ -1305,13 +1316,22 @@ function VerificationQueue() {
       )}
 
       <div className="mt-10 space-y-5">
-        {requests.map((r) => (
+        {requests.map((r) => {
+          const contact = r.seller_profile?.profile_contacts
+          const phone = (Array.isArray(contact) ? contact[0] : contact)?.phone
+          return (
           <div key={r.id} className="rounded-2xl border border-hairline bg-white p-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <p className="font-display text-lg text-ink">{r.legal_name}</p>
                 <p className="mt-1 font-mono text-xs text-muted">
-                  {r.id_type} · {r.id_number} · {r.seller_profile?.phone || 'no phone on file'}
+                  {r.id_type} · {revealedIds[r.id] || (r.id_number_last4 ? `••••${r.id_number_last4}` : 'no ID number')}
+                  {!revealedIds[r.id] && r.id_number_last4 && (
+                    <button type="button" onClick={() => revealIdNumber(r)} className="ml-2 underline hover:text-seal">
+                      Reveal
+                    </button>
+                  )}
+                  {' · '}{phone || 'no phone on file'}
                 </p>
                 <p className="mt-1 text-xs text-muted">
                   Submitted {new Date(r.created_at).toLocaleDateString()}
@@ -1346,7 +1366,8 @@ function VerificationQueue() {
               </button>
             </div>
           </div>
-        ))}
+          )
+        })}
       </div>
     </section>
   )

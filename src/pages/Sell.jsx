@@ -215,16 +215,10 @@ function SellerOrderManager({ session }) {
     setBusyOrderId(orderId)
 
     try {
-      const { error } = await supabase
-        .from('orders')
-        .update({
-          fulfilled_at: new Date().toISOString(),
-          status: 'fulfilled',
-        })
-        .eq('id', orderId)
-        .eq('seller_id', session.user.id)
+      const { data, error } = await supabase.rpc('mark_order_fulfilled', { p_order_id: orderId })
 
       if (error) throw error
+      if (!data?.success) throw new Error(data?.error || 'Failed to mark as delivered.')
 
       setOrders((prev) => prev.map((order) => order.id === orderId
         ? { ...order, status: 'fulfilled', fulfilled_at: new Date().toISOString() }
@@ -317,16 +311,24 @@ function ProfileSetup({ profile, setProfile, session }) {
     }
     const { data, error } = await supabase
       .from('profiles')
-      .update({ business_name: businessName, handle: cleanHandle, state, phone, bio: bio.trim(), avatar_url: avatarUrl })
+      .update({ business_name: businessName, handle: cleanHandle, state, bio: bio.trim(), avatar_url: avatarUrl })
       .eq('id', session.user.id)
       .select()
       .single()
-    setSaving(false)
     if (error) {
+      setSaving(false)
       setError(error.message.includes('duplicate') ? 'That handle is already taken — try another.' : error.message)
       return
     }
-    setProfile(data)
+    const { error: contactError } = await supabase
+      .from('profile_contacts')
+      .upsert({ id: session.user.id, phone: phone.trim(), updated_at: new Date().toISOString() })
+    setSaving(false)
+    if (contactError) {
+      setError(contactError.message)
+      return
+    }
+    setProfile({ ...data, phone: phone.trim() })
     setSaved(true)
   }
 
