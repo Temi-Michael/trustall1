@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { isUuid } from "../_shared/validate.ts";
+import { TOO_MANY_REQUESTS, withinRateLimit } from "../_shared/rateLimit.ts";
 
 Deno.serve(async (req) => {
   const corsHeaders = {
@@ -28,6 +29,9 @@ Deno.serve(async (req) => {
     }
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    if (!(await withinRateLimit(admin, `checkout:${user.id}`, 30, 600))) {
+      return new Response(JSON.stringify({ error: TOO_MANY_REQUESTS }), { status: 429, headers: corsHeaders });
+    }
 
     const { data: offer } = await admin
       .from('offers')
@@ -63,6 +67,7 @@ Deno.serve(async (req) => {
       total_charged: totalCharged,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
+    console.error('paystack-prepare-checkout failed', err);
+    return new Response(JSON.stringify({ error: 'Something went wrong. Please try again.' }), { status: 500, headers: corsHeaders });
   }
 });

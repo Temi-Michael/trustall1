@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { TOO_MANY_REQUESTS, withinRateLimit } from "../_shared/rateLimit.ts";
 
 Deno.serve(async (req) => {
   const corsHeaders = {
@@ -28,6 +29,9 @@ Deno.serve(async (req) => {
     }
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    if (!(await withinRateLimit(admin, `subaccount:${user.id}`, 5, 3600))) {
+      return new Response(JSON.stringify({ error: TOO_MANY_REQUESTS }), { status: 429, headers: corsHeaders });
+    }
     const { data: profile } = await admin.from('profiles').select('business_name, full_name').eq('id', user.id).single();
 
     const paystackSecret = Deno.env.get('PAYSTACK_SECRET_KEY');
@@ -73,6 +77,7 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
+    console.error('paystack-create-subaccount failed', err);
+    return new Response(JSON.stringify({ error: 'Something went wrong. Please try again.' }), { status: 500, headers: corsHeaders });
   }
 });

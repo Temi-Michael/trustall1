@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient.js'
 import { useProfile } from '../lib/useProfile.js'
 import { safeFileName } from '../lib/inputSafety.js'
+import { storagePathFromUrl } from '../lib/storagePaths.js'
 
 export default function DisputePage() {
   const { disputeId } = useParams()
@@ -10,6 +11,7 @@ export default function DisputePage() {
   const { session, profile, loading } = useProfile()
   const [dispute, setDispute] = useState(null)
   const [messages, setMessages] = useState([])
+  const [evidenceUrls, setEvidenceUrls] = useState({})
   const [judges, setJudges] = useState([])
   const [judgement, setJudgement] = useState('')
   const [winnerId, setWinnerId] = useState('')
@@ -55,6 +57,19 @@ export default function DisputePage() {
     setDispute(disputeData)
     setMessages(messagesData || [])
     setLoadingData(false)
+
+    // Evidence is in a private bucket: show it through short-lived signed links.
+    const paths = [...new Set((messagesData || [])
+      .flatMap((message) => message.dispute_evidence || [])
+      .map((file) => storagePathFromUrl(file.file_url, 'dispute-evidence'))
+      .filter(Boolean))]
+    if (paths.length === 0) return
+    const { data: signed, error: signError } = await supabase.storage.from('dispute-evidence').createSignedUrls(paths, 60 * 60)
+    if (signError) {
+      console.error('Could not load dispute evidence:', signError)
+      return
+    }
+    setEvidenceUrls(Object.fromEntries((signed || []).filter((item) => item.signedUrl).map((item) => [item.path, item.signedUrl])))
   }
 
   async function loadJudges() {
@@ -94,10 +109,10 @@ export default function DisputePage() {
           const path = `dispute-evidence/${disputeId}/${safeName}`
           const { error: uploadError } = await supabase.storage.from('dispute-evidence').upload(path, file, { upsert: true })
           if (uploadError) throw uploadError
-          const { data: urlData } = supabase.storage.from('dispute-evidence').getPublicUrl(path)
           uploaded.push({
             dispute_message_id: msg.id,
-            file_url: urlData.publicUrl,
+            // Store the path, not a public URL: the bucket is private.
+            file_url: path,
             file_type: file.type.startsWith('video/') ? 'video' : 'image',
           })
         }
@@ -282,10 +297,12 @@ export default function DisputePage() {
                     <div className="mt-3 grid gap-2 sm:grid-cols-2">
                       {message.dispute_evidence.map((file) => (
                         <div key={file.id} className="overflow-hidden rounded-xl border border-current/20 bg-white/10">
-                          {file.file_type === 'video' ? (
-                            <video controls src={file.file_url} className="h-36 w-full object-cover" />
+                          {!evidenceUrls[storagePathFromUrl(file.file_url, 'dispute-evidence')] ? (
+                            <p className="flex h-36 items-center justify-center p-3 text-xs opacity-70">Loading evidence…</p>
+                          ) : file.file_type === 'video' ? (
+                            <video controls src={evidenceUrls[storagePathFromUrl(file.file_url, 'dispute-evidence')]} className="h-36 w-full object-cover" />
                           ) : (
-                            <img src={file.file_url} alt="Dispute evidence" className="h-36 w-full object-cover" />
+                            <img src={evidenceUrls[storagePathFromUrl(file.file_url, 'dispute-evidence')]} alt="Dispute evidence" className="h-36 w-full object-cover" />
                           )}
                         </div>
                       ))}

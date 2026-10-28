@@ -31,7 +31,7 @@ Every problem found in the Trustall codebase during the October 2026 review, fix
 | 2.1 | **Every user's phone number was public.** Anyone with the site's public key could download them all. | 🔴 | ✅ |
 | 2.2 | **Government ID numbers (NIN/CAC) were stored in plain text.** | 🟠 | ✅ |
 | 2.3 | **Chat photos and videos were in a public folder.** Anyone with a link could open them, and any signed-in user could overwrite or delete other people's files. | 🟠 | ✅ |
-| 2.4 | **Dispute evidence is in a public folder**, saved with permanent public links. | 🟠 | ⏳ |
+| 2.4 | **Dispute evidence was in a public folder**, saved with permanent public links. | 🟠 | ✅ |
 
 ## 3. Orders and money
 
@@ -61,11 +61,11 @@ Every problem found in the Trustall codebase during the October 2026 review, fix
 | 4.7 | **A payment reference was inserted into a Paystack URL without encoding.** | 🟡 | ✅ |
 | 4.8 | **The push notification function accepted calls from anyone** if its secret wasn't set. | 🟠 | ✅ |
 | 4.9 | **The AI chat accepted prompts of any length**, so one request could run up the AI bill. | 🟡 | ✅ |
-| 4.10 | **The AI chat, email and checkout functions have no rate limiting**, so they can be called in a tight loop. | 🟡 | ⏳ |
+| 4.10 | **The AI chat, email and checkout functions had no rate limiting**, so they could be called in a tight loop. | 🟡 | ✅ |
 | 4.11 | **The upload proxy had no size or file-type limit.** It isn't used by the app at all. | 🟡 | ✅ (limits added; still worth deleting) |
 | 4.12 | **There were no text-length limits in the database**, so a single message or listing could hold megabytes of text. | ⚪ | ✅ |
 | 4.13 | **There were no file size or type limits on storage buckets.** | 🟡 | ✅ |
-| 4.14 | **Some server functions send internal error messages back to the browser**, revealing details about how the system works. | ⚪ | ⏳ |
+| 4.14 | **Some server functions sent internal error messages back to the browser**, revealing details about how the system works. | ⚪ | ✅ |
 
 ## 5. Seller verification
 
@@ -101,19 +101,49 @@ Every problem found in the Trustall codebase during the October 2026 review, fix
 | 8.8 | **Issuing a warning was three separate saves with no error checks.** | 🟡 | ✅ |
 | 8.9 | **There was no user detail view.** The people directory only showed name cards, searched only the 500 newest profiles, and couldn't search by email. | 🟡 | ✅ |
 | 8.10 | **Admins can't create promotions.** Sellers create them on the Marketing page; admins can only approve, pause or stop them. | ⚪ | ⏳ |
-| 8.11 | **The promotions screen loads every profile and listing** just to show names. | ⚪ | ⏳ |
-| 8.12 | **The verification queue only lists pending requests.** Past approvals and rejections can only be seen one user at a time, in that user's details panel. | ⚪ | ⏳ |
+| 8.11 | **The promotions screen loaded every profile and listing** just to show names. | ⚪ | ✅ |
+| 8.12 | **The verification queue only listed pending requests**, so past approvals and rejections weren't visible there. | ⚪ | ✅ |
 | 8.14 | **Sellers weren't told why their verification was rejected.** | ⚪ | ✅ |
-| 8.13 | **Some admin actions still save without checking for errors**, such as listing removal and judge toggles. | ⚪ | ⏳ |
+| 8.13 | **Some admin actions saved without checking for errors**: dismissing a report, reactivating an account, and recording a deleted document. | ⚪ | ✅ |
 
 ## 7. Housekeeping
 
 | # | Issue | Level | Status |
 |---|---|---|---|
-| 7.1 | **The `notificationUtils.test.js` test fails** on the original code. | ⚪ | ⏳ |
-| 7.2 | **`dist.zip` is committed, and about ten loose notes sit in the project root.** | ⚪ | ⏳ |
+| 7.1 | **The `notificationUtils.test.js` test failed** on the original code. | ⚪ | ✅ |
+| 7.2 | **`dist.zip` was committed, and 13 loose notes sat in the project root.** | ⚪ | ✅ |
 
 ---
+
+## What the open issues need
+
+These can't be finished from the code alone:
+
+| # | What's needed |
+|---|---|
+| 1.3, 6.5, 6.7 | **A copy of the live database schema** (the structure only, no data), so the live-only tables and functions can be reviewed and added to the migrations. With the Supabase CLI: `supabase db dump --schema public -f supabase/live_schema.sql`. |
+| 3.5 | **A manual review of seller wallets.** Old confirmations can't be told apart from new ones, so there's no safe automatic correction. The query below lists sellers to check. |
+| 3.9, 6.6 | **The source of the six live-only server functions** in this repository, e.g. `supabase functions download paystack-process-payout`. |
+| 5.2 | **A choice of ID verification provider** (Didit or Dojah) and its API keys. |
+| 5.3 | **An SMS provider** (e.g. Termii, or Supabase phone sign-in) to send verification codes. |
+| 8.10 | **The `promotions` table definition** (part of the schema copy above), so an admin "create promotion" form saves exactly what that table expects. |
+
+### Find wallets that may have been double-credited (issue 3.5)
+
+Lists sellers whose cleared wallet is larger than everything they've earned. Withdrawals only lower a wallet, so anyone listed needs a closer look. Run it in the Supabase SQL Editor; it only reads data.
+
+```sql
+select p.id, p.business_name, p.wallet_cleared,
+       coalesce(o.payouts, 0) as confirmed_payouts,
+       coalesce(r.bonuses, 0) as referral_bonuses
+from public.profiles p
+left join (select seller_id, sum(seller_payout) as payouts from public.orders
+           where status in ('confirmed', 'complete') group by seller_id) o on o.seller_id = p.id
+left join (select referrer_id, sum(amount) as bonuses from public.referral_bonuses
+           where status in ('cleared', 'paid') group by referrer_id) r on r.referrer_id = p.id
+where p.wallet_cleared > coalesce(o.payouts, 0) + coalesce(r.bonuses, 0)
+order by p.wallet_cleared - coalesce(o.payouts, 0) - coalesce(r.bonuses, 0) desc;
+```
 
 ### Check for tables without row-level security
 

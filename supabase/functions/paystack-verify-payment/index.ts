@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { isUuid } from "../_shared/validate.ts";
+import { TOO_MANY_REQUESTS, withinRateLimit } from "../_shared/rateLimit.ts";
 
 // Issued order references: 12-character suffix now, 8 for ones issued earlier.
 const ORDER_REFERENCE = /^TRUST-ORD-(?:[A-HJ-NP-Z2-9]{8}|[A-HJ-NP-Z2-9]{12})$/;
@@ -32,6 +33,10 @@ Deno.serve(async (req) => {
     }
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    // Generous: a real buyer verifies once per payment.
+    if (!(await withinRateLimit(admin, `verify:${user.id}`, 20, 600))) {
+      return new Response(JSON.stringify({ error: TOO_MANY_REQUESTS }), { status: 429, headers: corsHeaders });
+    }
 
     // The reference must have been issued to this buyer for this offer and not used yet.
     const { data: issued } = await admin
@@ -108,7 +113,12 @@ Deno.serve(async (req) => {
     }).select().single();
 
     if (orderError) {
-      return new Response(JSON.stringify({ error: orderError.message }), { status: 500, headers: corsHeaders });
+      console.error('Order insert failed', orderError);
+      // 23505: unique index on paystack_reference, i.e. this payment already has an order.
+      const message = orderError.code === '23505'
+        ? 'This payment has already been recorded.'
+        : 'Payment received, but the order could not be created. Please contact support with your reference.';
+      return new Response(JSON.stringify({ error: message }), { status: orderError.code === '23505' ? 409 : 500, headers: corsHeaders });
     }
 
     await admin.from('offers').update({ status: 'accepted' }).eq('id', offer.id);
@@ -118,6 +128,7 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
+    console.error('paystack-verify-payment failed', err);
+    return new Response(JSON.stringify({ error: 'Something went wrong while confirming your payment.' }), { status: 500, headers: corsHeaders });
   }
 });

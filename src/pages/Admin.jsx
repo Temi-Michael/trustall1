@@ -945,11 +945,17 @@ function AdminPromotions() {
   async function loadPromotions() {
     setLoading(true)
     setError('')
-    const [promotionResult, revenueResult, profileResult, listingResult] = await Promise.all([
+    const [promotionResult, revenueResult] = await Promise.all([
       supabase.from('promotions').select('*').order('created_at', { ascending: false }),
       supabase.from('promotions').select('amount').eq('payment_status', 'successful'),
-      supabase.from('profiles').select('id, full_name, business_name'),
-      supabase.from('listings').select('id, title'),
+    ])
+    // Only look up the sellers and listings these promotions point at.
+    const rows = promotionResult.data || []
+    const sellerIds = [...new Set(rows.map((row) => row.seller_id).filter(Boolean))]
+    const listingIds = [...new Set(rows.filter((row) => row.target_type !== 'storefront').map((row) => row.target_id).filter(Boolean))]
+    const [profileResult, listingResult] = await Promise.all([
+      sellerIds.length ? supabase.from('profiles').select('id, full_name, business_name').in('id', sellerIds) : { data: [] },
+      listingIds.length ? supabase.from('listings').select('id, title').in('id', listingIds) : { data: [] },
     ])
     const queryError = promotionResult.error || revenueResult.error || profileResult.error || listingResult.error
     if (queryError) setError(queryError.message || 'Promotion data could not be loaded.')
@@ -1494,7 +1500,10 @@ function AuditLog() {
   )
 }
 
+const VERIFICATION_VIEWS = [['pending', 'Pending'], ['approved', 'Approved'], ['rejected', 'Rejected']]
+
 function VerificationQueue() {
+  const [view, setView] = useState('pending')
   const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
   const [docUrls, setDocUrls] = useState({})
@@ -1507,7 +1516,7 @@ function VerificationQueue() {
     // Realtime alone keeps the queue current; polling and profile updates
     // (which fire on every presence ping) caused constant reloads.
     const channel = supabase
-      .channel('admin-verification-queue')
+      .channel(`admin-verification-${view}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'verification_requests' }, loadRequests)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'verification_requests' }, loadRequests)
       .subscribe()
@@ -1515,16 +1524,18 @@ function VerificationQueue() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [])
+  }, [view])
 
   async function loadRequests() {
     setLoading(true)
 
+    // Pending: oldest first, so the queue is worked in order. History: newest first.
     const { data, error } = await supabase
       .from('verification_requests')
       .select('*, seller_profile:seller_id(full_name, business_name, verified_seller, status, seller_level, profile_contacts(phone))')
-      .eq('status', 'pending')
-      .order('created_at', { ascending: true })
+      .eq('status', view)
+      .order(view === 'pending' ? 'created_at' : 'reviewed_at', { ascending: view === 'pending' })
+      .limit(100)
 
     if (error) {
       console.error('Admin verification fetch failed:', error)
@@ -1533,20 +1544,21 @@ function VerificationQueue() {
       return
     }
 
-    const queue = (data || []).filter((row) => row.status === 'pending')
-
-    setRequests(queue)
+    const rows = data || []
+    setRequests(rows)
     setLoading(false)
 
-    const urls = {}
-    for (const r of queue) {
-      if (!r.document_url) continue
-      const { data: signed } = await supabase.storage
-        .from('verification-docs')
-        .createSignedUrl(r.document_url, 60 * 10)
-      if (signed) urls[r.id] = signed.signedUrl
+    // Rejected documents are deleted, so only sign links for files that still exist.
+    const withDocuments = rows.filter((r) => r.document_url && !r.document_deleted_at)
+    if (withDocuments.length === 0) {
+      setDocUrls({})
+      return
     }
-    setDocUrls(urls)
+    const { data: signed } = await supabase.storage
+      .from('verification-docs')
+      .createSignedUrls(withDocuments.map((r) => r.document_url), 60 * 10)
+    const urlByPath = new Map((signed || []).filter((item) => item.signedUrl).map((item) => [item.path, item.signedUrl]))
+    setDocUrls(Object.fromEntries(withDocuments.map((r) => [r.id, urlByPath.get(r.document_url)]).filter(([, url]) => url)))
   }
 
   // ID numbers are encrypted at rest; only admins can decrypt them, one request at a time.
@@ -1577,8 +1589,12 @@ function VerificationQueue() {
     // Rejected ID documents aren't kept: delete the file, then record that it's gone.
     if (!approve && data.document_path) {
       const { error: removeError } = await supabase.storage.from('verification-docs').remove([data.document_path])
-      if (removeError) alert(`Rejected, but the document could not be deleted: ${removeError.message}`)
-      else await supabase.from('verification_requests').update({ document_deleted_at: new Date().toISOString() }).eq('id', request.id)
+      if (removeError) {
+        alert(`Rejected, but the document could not be deleted: ${removeError.message}`)
+      } else {
+        const { error: markError } = await supabase.from('verification_requests').update({ document_deleted_at: new Date().toISOString() }).eq('id', request.id)
+        if (markError) console.error('Document deleted, but its deletion time was not recorded:', markError)
+      }
     }
 
     setRequests((prev) => prev.filter((r) => r.id !== request.id))
@@ -1589,15 +1605,21 @@ function VerificationQueue() {
     <section className="mx-auto max-w-4xl px-6 py-10">
       <h1 className="font-display text-2xl font-bold text-ink">Seller verification</h1>
 
-      {loading && <p className="mt-10 text-muted">Loading pending requests…</p>}
+      <div className="mt-5 flex flex-wrap gap-2">
+        {VERIFICATION_VIEWS.map(([id, label]) => (
+          <button key={id} type="button" onClick={() => setView(id)} aria-pressed={view === id} className={`rounded-full px-4 py-2 text-xs font-semibold ${view === id ? 'bg-seal text-white' : 'border border-hairline text-muted'}`}>{label}</button>
+        ))}
+      </div>
+
+      {loading && <p className="mt-10 text-muted">Loading {view} requests…</p>}
 
       {!loading && requests.length === 0 && (
         <p className="mt-10 rounded-xl border border-hairline bg-white p-6 text-muted">
-          No pending verification requests right now.
+          No {view} verification requests{view === 'pending' ? ' right now' : ''}.
         </p>
       )}
 
-      <div className="mt-10 space-y-5">
+      <div className="mt-8 space-y-5">
         {requests.map((r) => {
           const contact = r.seller_profile?.profile_contacts
           const phone = (Array.isArray(contact) ? contact[0] : contact)?.phone
@@ -1617,7 +1639,10 @@ function VerificationQueue() {
                 </p>
                 <p className="mt-1 text-xs text-muted">
                   Submitted {new Date(r.created_at).toLocaleDateString()}
+                  {r.reviewed_at && ` · ${r.status} ${new Date(r.reviewed_at).toLocaleDateString()}`}
                 </p>
+                {r.rejection_reason && <p className="mt-1 text-xs text-marigold-deep">Reason: {r.rejection_reason}</p>}
+                {r.document_deleted_at && <p className="mt-1 text-xs text-muted">Document deleted after rejection.</p>}
               </div>
               {docUrls[r.id] && (
                 <a
@@ -1631,7 +1656,7 @@ function VerificationQueue() {
               )}
             </div>
 
-            <div className="mt-5 flex gap-3">
+            {r.status === 'pending' && <div className="mt-5 flex gap-3">
               <button
                 disabled={busyId === r.id}
                 onClick={() => decide(r, true)}
@@ -1646,7 +1671,7 @@ function VerificationQueue() {
               >
                 Reject
               </button>
-            </div>
+            </div>}
           </div>
           )
         })}
@@ -1969,14 +1994,16 @@ function ReportsQueue() {
 
   async function dismiss(report) {
     setBusyId(report.id)
-    await supabase.from('reports').update({ status: 'dismissed' }).eq('id', report.id)
+    const { error } = await supabase.from('reports').update({ status: 'dismissed' }).eq('id', report.id)
+    if (error) alert(`The report could not be dismissed: ${error.message}`)
     setBusyId(null)
     loadReports()
   }
 
   async function reactivate(report) {
     setBusyId(report.id)
-    await supabase.from('profiles').update({ status: 'active' }).eq('id', report.reported.id)
+    const { error } = await supabase.from('profiles').update({ status: 'active' }).eq('id', report.reported.id)
+    if (error) alert(`The account could not be reactivated: ${error.message}`)
     setBusyId(null)
     loadReports()
   }

@@ -90,18 +90,28 @@ grant select (new_column) on public.profiles to anon, authenticated;
 - **Bookmarkable sections:** dashboard sections can be linked directly, e.g. `/admin?section=verification`.
 - **User details:** in **Users, sellers & buyers**, search by name, business name, handle, email or user ID, then select a person to open a side panel with everything about them. That covers their account and contact details, standing, wallet, activity, verification history and warnings, plus a link to their public profile. Press **Esc** or click outside the panel to close it.
 - **For developers:** `admin_search_users(query, filter, limit, offset)` and `admin_get_user_details(user_id)` power this screen. Both refuse non-admins.
+- **Verification history:** the verification queue has Pending, Approved and Rejected tabs.
 
-## 6. Rolling this out
+## 6. Rate limits and private evidence (migration 0035)
+
+- **Rate limits:** server functions and checkout now limit how often each person can call them. The limits are listed in [fix.md](fix.md) under 4.10.
+  - **Adding one to another function:** call `withinRateLimit(admin, key, limit, seconds)` from `supabase/functions/_shared/rateLimit.ts`.
+  - **Inside the database:** call `public.consume_rate_limit(key, limit, seconds)` from a database function.
+- **Private dispute evidence:** only the people in a dispute (and admins) can see its files. The dispute page uses links that expire after an hour.
+- **Project notes:** the old notes (deploy guides, feature write-ups) now live in `docs/`.
+
+## 7. Rolling this out
 
 1. **Database:** paste `supabase/all_migrations.sql` into the Supabase SQL Editor and click **Run**.
 2. **Server functions:** deploy the changed ones:
    ```bash
-   supabase functions deploy paystack-verify-payment paystack-prepare-checkout paystack-create-subaccount send-notification-email send-push-notification ai-matchmaker upload-proxy
+   supabase functions deploy paystack-verify-payment paystack-prepare-checkout paystack-create-subaccount paystack-create-recipient send-notification-email send-push-notification ai-matchmaker upload-proxy
    ```
+   The shared helpers in `supabase/functions/_shared/` are bundled automatically.
 3. **Push secret:** set the push secret and send it from the database webhook. Push notifications stop until both are done.
    - In Supabase → Edge Functions → Secrets, add `PUSH_WEBHOOK_SECRET` with a long random value.
    - In the database webhook that calls `send-push-notification`, add the header `x-push-secret` with the same value.
-4. **Frontend:** deploy it straight after step 2. The old frontend still writes phone numbers to the old place and builds its own payment references, so it stops working once the database is updated.
+4. **Frontend:** deploy it straight after step 2. The old frontend still writes phone numbers to the old place, builds its own payment references and shows dispute evidence through public links, so it stops working once the database is updated.
 5. **Check:**
    - In the admin dashboard, confirm analytics loads. If it says "not deployed", migration 0021 was recorded as applied but never actually ran. Run this in the SQL Editor, then paste `all_migrations.sql` again:
      ```sql

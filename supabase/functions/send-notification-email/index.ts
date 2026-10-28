@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { boundedText, escapeHtml } from "../_shared/validate.ts";
+import { TOO_MANY_REQUESTS, withinRateLimit } from "../_shared/rateLimit.ts";
 
 // Sends a notification email to the signed-in caller only. The recipient comes
 // from the verified session and the HTML is built here from escaped plain text,
@@ -24,6 +25,9 @@ Deno.serve(async (req) => {
     );
     const { data: { user } } = await userClient.auth.getUser();
     if (!user?.email) return json({ error: 'Unauthorized' }, 401);
+
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    if (!(await withinRateLimit(admin, `email:${user.id}`, 10, 3600))) return json({ error: TOO_MANY_REQUESTS }, 429);
 
     const payload = await req.json().catch(() => null);
     const subject = boundedText(payload?.subject, 150);

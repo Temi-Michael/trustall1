@@ -41,6 +41,11 @@ How each fixed issue from [issues.md](issues.md) was solved. The numbers match t
 - **What changed:** the chat attachments bucket is private. Only the two people in a conversation (and admins) can open, upload, replace or delete its files. The app shows them through short-lived signed links.
 - **Where:** `0028_security_lockdown.sql`.
 
+**2.4: Dispute evidence was public**
+- **What changed:** the dispute evidence bucket is private. Only the buyer, the seller, whoever filed the dispute, the assigned judge and admins can open or add files for that case; admins alone can delete them. Any older rules on this bucket, including ones made in the dashboard, are removed first.
+- **How the page shows files:** new uploads store the file's path instead of a public link, and the dispute page shows files through links that expire after an hour. Evidence uploaded before the change still displays, because its old public link is turned back into a path.
+- **Where:** `0035_private_evidence_and_rate_limits.sql`, `Dispute.jsx`, `src/lib/storagePaths.js`.
+
 ## 3. Orders and money
 
 **3.1: Direct order edits**
@@ -113,6 +118,27 @@ How each fixed issue from [issues.md](issues.md) was solved. The numbers match t
 - **Old data:** existing rows aren't re-checked, so old data stays usable.
 - **Where:** `0032_input_constraints.sql`.
 
+**4.10: No rate limiting**
+- **What changed:** the database now counts calls and refuses extras with "Too many requests. Please wait a few minutes and try again."
+
+  | What | Limit |
+  |---|---|
+  | AI chat (by internet address, since signed-out visitors can use it) | 20 per 10 minutes |
+  | Notification emails | 10 per hour per user |
+  | Checkout references | 20 per 10 minutes per buyer |
+  | Checkout setup | 30 per 10 minutes per user |
+  | Payment confirmation | 20 per 10 minutes per user |
+  | Connecting a payout account | 5 per hour per user, for each of the two setup functions |
+  | Uploads through the upload proxy | 30 per 10 minutes per user |
+
+- **If the counter itself fails**, requests are allowed rather than blocked, so a fault can never stop someone paying.
+- **Where:** `consume_rate_limit()` in `0035_private_evidence_and_rate_limits.sql`, `supabase/functions/_shared/rateLimit.ts`.
+
+**4.14: Internal error messages**
+- **What changed:** when something breaks unexpectedly, server functions now reply with a plain message such as "Something went wrong. Please try again." The real error goes to the function logs in Supabase, where you can still see it.
+- **Kept as-is:** messages that help the user, such as Paystack's "Account number is invalid", are still shown.
+- **Small improvement:** paying twice for the same payment now says "This payment has already been recorded" instead of a database error.
+
 ## 5. Seller verification
 
 **5.1: Self-approved requests**
@@ -126,6 +152,18 @@ How each fixed issue from [issues.md](issues.md) was solved. The numbers match t
 
 **6.3: Missing `disputes` table**
 - **What changed:** `0020_disputes_table.sql` creates it, with access rules, on a database that doesn't have one. It was rebuilt from how the app uses disputes. On the live database, which already has the table, it does nothing.
+
+**6.4: No migration history**
+- **What changed:** `supabase/all_migrations.sql` records each migration as it runs and skips it next time. You can paste the whole file into the SQL Editor whenever there's something new. See [update.md](update.md).
+
+## 7. Housekeeping
+
+**7.1: Failing test**
+- **What was wrong:** the test loaded `notificationUtils.js`, which pulls in the Supabase client, and that client only works inside the Vite build.
+- **What changed:** the two functions under test moved to `notificationFormat.js`, which has no Supabase dependency. `notificationUtils.js` re-exports them, so the rest of the app is unchanged. All tests pass now.
+
+**7.2: Repo clutter**
+- **What changed:** the 13 loose notes moved into `docs/`. `dist.zip`, a build output, was removed from the repository and added to `.gitignore`. Only README, issues, fix and update stay in the project root.
 
 ## 8. Admin dashboard
 
@@ -164,5 +202,12 @@ How each fixed issue from [issues.md](issues.md) was solved. The numbers match t
 - **What changed:** the seller's verification panel now shows the reason the admin gave.
 - **Where:** `Sell.jsx`.
 
-**6.4: No migration history**
-- **What changed:** `supabase/all_migrations.sql` records each migration as it runs and skips it next time. You can paste the whole file into the SQL Editor whenever there's something new. See [update.md](update.md).
+**8.11: Promotions screen loaded everything**
+- **What changed:** it now looks up only the sellers and listings that the promotions on screen point at.
+
+**8.12: Verification history hidden**
+- **What changed:** the verification queue has **Pending**, **Approved** and **Rejected** tabs. Past requests show when they were reviewed, the rejection reason and whether the document was deleted. Only pending requests have Approve and Reject buttons.
+
+**8.13: Admin actions without error checks**
+- **What changed:** dismissing a report, reactivating an account and recording a deleted document now show or log an error if the save fails, instead of failing silently.
+- **Where:** `Admin.jsx`.

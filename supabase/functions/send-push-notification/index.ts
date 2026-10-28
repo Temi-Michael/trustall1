@@ -123,6 +123,6 @@ Deno.serve(async (request) => {
     return new Response(JSON.stringify({ sent, removed: failedTokenIds.length }), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
   } catch (error) {
     console.error("Push notification failed:", error)
-    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Push notification failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } })
+    return new Response(JSON.stringify({ error: "Push notification failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } })
   }
 })
