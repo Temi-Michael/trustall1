@@ -482,7 +482,7 @@ function VerificationBlock({ profile, session }) {
       </p>
       {existing?.status === 'rejected' && (
         <p className="mt-2 text-sm text-marigold-deep">
-          Your last submission wasn't approved — please check your details and try again.
+          Your last submission wasn't approved{existing.rejection_reason ? `: ${existing.rejection_reason}` : ''}. Please check your details and try again.
         </p>
       )}
       <form onSubmit={submit} className="mt-5 grid gap-4 sm:grid-cols-2">

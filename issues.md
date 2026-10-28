@@ -99,10 +99,11 @@ Every problem found in the Trustall codebase during the October 2026 review, fix
 | 8.6 | **Rejected ID documents were kept forever.** | 🟡 | ✅ |
 | 8.7 | **The verification queue reloaded every 3.5 seconds**, and on every profile change, regenerating document links each time. | ⚪ | ✅ |
 | 8.8 | **Issuing a warning was three separate saves with no error checks.** | 🟡 | ✅ |
-| 8.9 | **There's no user detail view.** The people directory only shows name cards and loads at most 500 profiles. The database functions for search and details exist (`admin_search_users`, `admin_get_user_details`), but no screen uses them yet. | 🟡 | ⏳ |
+| 8.9 | **There was no user detail view.** The people directory only showed name cards, searched only the 500 newest profiles, and couldn't search by email. | 🟡 | ✅ |
 | 8.10 | **Admins can't create promotions.** Sellers create them on the Marketing page; admins can only approve, pause or stop them. | ⚪ | ⏳ |
 | 8.11 | **The promotions screen loads every profile and listing** just to show names. | ⚪ | ⏳ |
-| 8.12 | **Verification history is hidden.** The queue only shows pending requests; approved and rejected ones aren't listed, and sellers aren't shown the rejection reason. | ⚪ | ⏳ |
+| 8.12 | **The verification queue only lists pending requests.** Past approvals and rejections can only be seen one user at a time, in that user's details panel. | ⚪ | ⏳ |
+| 8.14 | **Sellers weren't told why their verification was rejected.** | ⚪ | ✅ |
 | 8.13 | **Some admin actions still save without checking for errors**, such as listing removal and judge toggles. | ⚪ | ⏳ |
 
 ## 7. Housekeeping

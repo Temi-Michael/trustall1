@@ -88,7 +88,8 @@ grant select (new_column) on public.profiles to anon, authenticated;
 - **Audit log section:** lists the latest 200 admin changes.
 - **Verification:** rejection reasons are stored in `rejection_reason`, and rejected documents are deleted, with the time recorded in `document_deleted_at`.
 - **Bookmarkable sections:** dashboard sections can be linked directly, e.g. `/admin?section=verification`.
-- **User lookup functions (no screen yet):** `admin_search_users(query, filter)` searches by name, handle, email or ID. `admin_get_user_details(user_id)` returns a user's email, phone, sign-in dates, listings, orders, verification history, warnings and reports.
+- **User details:** in **Users, sellers & buyers**, search by name, business name, handle, email or user ID, then select a person to open a side panel with everything about them. That covers their account and contact details, standing, wallet, activity, verification history and warnings, plus a link to their public profile. Press **Esc** or click outside the panel to close it.
+- **For developers:** `admin_search_users(query, filter, limit, offset)` and `admin_get_user_details(user_id)` power this screen. Both refuse non-admins.
 
 ## 6. Rolling this out
 

@@ -6,6 +6,9 @@ import { LISTING_CATEGORIES } from '../lib/listingCategories.js'
 import { NIGERIAN_BANKS } from '../lib/nigerianBanks.js'
 import { escapeLikePattern, safeFileName } from '../lib/inputSafety.js'
 import { sanitizeHtml } from '../lib/sanitizeHtml.js'
+import { useBalanceVisibility } from '../lib/useBalanceVisibility.js'
+import { formatBalance } from '../lib/balanceDisplay.js'
+import BalanceToggle from '../components/BalanceToggle.jsx'
 
 export default function Admin() {
   const [session, setSession] = useState(null)
@@ -685,30 +688,247 @@ function MediatorManagement() {
   return <section className="mx-auto max-w-3xl px-6 py-10"><p className="font-mono text-xs uppercase tracking-widest text-seal">Access</p><h1 className="mt-2 font-display text-2xl font-bold text-ink">Mediator eligibility</h1><p className="mt-2 text-sm text-muted">Designate trusted non-admin profiles to mediate disputes. The database policy remains the enforcement boundary.</p>{error && <p className="mt-4 text-sm text-marigold-deep">{error}</p>}<div className="mt-6 space-y-2">{profiles.map((profile) => <div key={profile.id} className="flex items-center justify-between rounded-xl border border-hairline bg-white p-4"><div><p className="font-semibold text-ink">{profile.business_name || profile.full_name || 'Unnamed profile'}</p><p className="text-xs text-muted">{profile.role} · {profile.is_dispute_judge ? 'Eligible mediator' : 'Not designated'}</p></div><button type="button" onClick={() => toggle(profile)} className="rounded-full border border-hairline px-3 py-1.5 font-mono text-xs">{profile.is_dispute_judge ? 'Remove eligibility' : 'Make mediator'}</button></div>)}</div></section>
 }
 
+const DIRECTORY_FILTERS = [['all', 'All'], ['sellers', 'Sellers'], ['buyers', 'Buyers'], ['suspended', 'Suspended']]
+
 function ProfileDirectory() {
   const [profiles, setProfiles] = useState([])
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
+  const [query, setQuery] = useState('')
+  const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [selectedId, setSelectedId] = useState(null)
+
+  // Wait for a pause in typing before searching.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setQuery(search.trim())
+      setPage(0)
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [search])
+
+  // The database searches every user (name, business, handle, email or ID), not just a loaded page.
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    setError('')
+    supabase.rpc('admin_search_users', {
+      p_query: query, p_filter: filter, p_limit: ADMIN_PAGE_SIZE, p_offset: page * ADMIN_PAGE_SIZE,
+    }).then(({ data, error: queryError }) => {
+      if (!active) return
+      if (queryError) setError(queryError.message)
+      setProfiles(data || [])
+      setLoading(false)
+    })
+    return () => { active = false }
+  }, [query, filter, page])
+
+  return (
+    <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-widest text-seal">People</p>
+          <h1 className="mt-2 font-display text-2xl font-bold text-ink">Users, sellers & buyers</h1>
+          <p className="mt-1 text-sm text-muted">Search everyone on Trustall. Select a person to see their full details.</p>
+        </div>
+        <label className="flex min-h-11 min-w-[240px] items-center gap-2 rounded-lg border border-hairline bg-white px-3">
+          <Search size={16} className="text-muted" />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name, handle, email or ID" aria-label="Search users" className="min-w-0 flex-1 border-0 bg-transparent text-sm outline-none" />
+        </label>
+      </div>
+      <div className="mt-5 flex flex-wrap gap-2">
+        {DIRECTORY_FILTERS.map(([id, label]) => (
+          <button key={id} type="button" onClick={() => { setFilter(id); setPage(0) }} aria-pressed={filter === id} className={`rounded-full px-4 py-2 text-xs font-semibold ${filter === id ? 'bg-seal text-white' : 'border border-hairline text-muted'}`}>{label}</button>
+        ))}
+      </div>
+      {error && <p className="mt-5 text-sm text-marigold-deep">{error}</p>}
+      {loading && <p className="mt-6 text-sm text-muted">Loading profiles…</p>}
+      {!loading && !error && profiles.length === 0 && <p className="mt-6 rounded-xl border border-hairline bg-white p-5 text-sm text-muted">No one matches this search.</p>}
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {profiles.map((profile) => (
+          <button key={profile.id} type="button" onClick={() => setSelectedId(profile.id)} className="rounded-xl border border-hairline bg-white p-4 text-left transition hover:border-seal focus-visible:border-seal focus-visible:outline-none">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate font-semibold text-ink">{profile.business_name || profile.full_name || 'Unnamed profile'}</p>
+                <p className="mt-1 truncate text-xs text-muted">{profile.email || (profile.handle ? `@${profile.handle}` : profile.id)}</p>
+              </div>
+              <span className="rounded-full bg-surfacealt px-2.5 py-1 font-mono text-[9px] uppercase text-muted">{profile.is_seller ? 'Seller' : 'Buyer'}</span>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-hairline pt-3 text-xs">
+              <span className={profile.verified_seller ? 'font-semibold text-seal' : 'text-muted'}>{profile.verified_seller ? 'Verified seller' : profile.role || 'Member'}</span>
+              <span className={profile.status === 'suspended' ? 'font-semibold text-marigold-deep' : 'text-muted'}>{profile.status || 'active'}</span>
+              <span className="w-full text-[10px] text-muted">Joined {profile.created_at ? new Date(profile.created_at).toLocaleDateString() : 'date unavailable'}</span>
+            </div>
+          </button>
+        ))}
+      </div>
+      <div className="mt-4 flex justify-between">
+        <button type="button" disabled={page === 0 || loading} onClick={() => setPage((value) => value - 1)} className="rounded-full border border-hairline px-4 py-2 font-mono text-xs disabled:opacity-40">Previous</button>
+        <button type="button" disabled={profiles.length < ADMIN_PAGE_SIZE || loading} onClick={() => setPage((value) => value + 1)} className="rounded-full border border-hairline px-4 py-2 font-mono text-xs disabled:opacity-40">Next</button>
+      </div>
+      <UserDetailsPanel userId={selectedId} onClose={() => setSelectedId(null)} />
+    </section>
+  )
+}
+
+function formatDateTime(value) {
+  return value ? new Date(value).toLocaleString() : '—'
+}
+
+function DetailRow({ label, children }) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-1.5 text-sm">
+      <dt className="text-muted">{label}</dt>
+      <dd className="min-w-0 break-words text-right font-medium text-ink">{children}</dd>
+    </div>
+  )
+}
+
+function DetailSection({ title, children }) {
+  return (
+    <section className="mt-5 rounded-xl border border-hairline p-4">
+      <h3 className="font-mono text-[10px] uppercase tracking-widest text-seal">{title}</h3>
+      <div className="mt-2">{children}</div>
+    </section>
+  )
+}
+
+// Full picture of one user for admins: account, contact, money, activity,
+// verification history and warnings. Private fields come from an admin-only RPC.
+function UserDetailsPanel({ userId, onClose }) {
+  const [details, setDetails] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const { hidden: balancesHidden, toggle: toggleBalances } = useBalanceVisibility()
 
   useEffect(() => {
-    supabase.from('profiles').select('id, full_name, business_name, handle, is_seller, verified_seller, status, role, created_at').order('created_at', { ascending: false }).range(0, 499)
-      .then(({ data, error: queryError }) => {
-        if (queryError) setError(queryError.message)
-        else setProfiles(data || [])
-        setLoading(false)
-      })
-  }, [])
+    if (!userId) return undefined
+    let active = true
+    setDetails(null)
+    setError('')
+    setLoading(true)
+    supabase.rpc('admin_get_user_details', { p_user_id: userId }).then(({ data, error: queryError }) => {
+      if (!active) return
+      if (queryError) setError(queryError.message)
+      else if (!data) setError('This user no longer exists.')
+      setDetails(data || null)
+      setLoading(false)
+    })
+    return () => { active = false }
+  }, [userId])
 
-  const visibleProfiles = profiles.filter((profile) => {
-    if (filter === 'sellers' && !profile.is_seller) return false
-    if (filter === 'buyers' && profile.is_seller) return false
-    const name = `${profile.business_name || ''} ${profile.full_name || ''} ${profile.handle || ''}`.toLowerCase()
-    return !search.trim() || name.includes(search.trim().toLowerCase())
-  })
+  useEffect(() => {
+    if (!userId) return undefined
+    const closeOnEscape = (event) => { if (event.key === 'Escape') onClose() }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [userId, onClose])
 
-  return <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6"><div className="flex flex-wrap items-end justify-between gap-4"><div><p className="font-mono text-[10px] uppercase tracking-widest text-seal">People</p><h1 className="mt-2 font-display text-2xl font-bold text-ink">Users, sellers & buyers</h1><p className="mt-1 text-sm text-muted">Profiles loaded from the live directory.</p></div><label className="flex min-h-11 min-w-[240px] items-center gap-2 rounded-lg border border-hairline bg-white px-3"><Search size={16} className="text-muted" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name or handle" className="min-w-0 flex-1 border-0 bg-transparent text-sm outline-none" /></label></div><div className="mt-5 flex flex-wrap gap-2">{[['all', 'All'], ['sellers', 'Sellers'], ['buyers', 'Buyers']].map(([id, label]) => <button key={id} type="button" onClick={() => setFilter(id)} className={`rounded-full px-4 py-2 text-xs font-semibold ${filter === id ? 'bg-seal text-white' : 'border border-hairline text-muted'}`}>{label}</button>)}</div>{error && <p className="mt-5 text-sm text-marigold-deep">{error}</p>}{loading && <p className="mt-6 text-sm text-muted">Loading profiles…</p>}{!loading && !error && visibleProfiles.length === 0 && <p className="mt-6 rounded-xl border border-hairline bg-white p-5 text-sm text-muted">No profiles match this filter.</p>}<div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{visibleProfiles.map((profile) => <article key={profile.id} className="rounded-xl border border-hairline bg-white p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-semibold text-ink">{profile.business_name || profile.full_name || 'Unnamed profile'}</p><p className="mt-1 truncate text-xs text-muted">{profile.handle ? `@${profile.handle}` : profile.id}</p></div><span className="rounded-full bg-surfacealt px-2.5 py-1 font-mono text-[9px] uppercase text-muted">{profile.is_seller ? 'Seller' : 'Buyer'}</span></div><div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-hairline pt-3 text-xs"><span className={profile.verified_seller ? 'font-semibold text-seal' : 'text-muted'}>{profile.verified_seller ? 'Verified seller' : profile.role || 'Member'}</span><span className="text-muted">{profile.status || 'active'}</span><span className="w-full text-[10px] text-muted">Joined {profile.created_at ? new Date(profile.created_at).toLocaleDateString() : 'date unavailable'}</span></div></article>)}</div></section>
+  if (!userId) return null
+
+  const profile = details?.profile || {}
+  const account = details?.account || {}
+  const name = profile.business_name || profile.full_name || 'Unnamed profile'
+  const publicPath = profile.is_seller ? `/seller/${profile.handle || profile.id}` : `/buyer/${profile.handle || profile.id}`
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+      <aside role="dialog" aria-modal="true" aria-labelledby="user-details-title" onClick={(event) => event.stopPropagation()} className="h-full w-full max-w-lg overflow-y-auto bg-white p-5 shadow-2xl sm:p-6">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="font-mono text-[10px] uppercase tracking-widest text-seal">User details</p>
+            <h2 id="user-details-title" className="mt-1 truncate font-display text-xl font-bold text-ink">{loading ? 'Loading…' : name}</h2>
+            {profile.handle && <p className="text-xs text-muted">@{profile.handle}</p>}
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close user details" className="rounded-full border border-hairline p-2 text-muted hover:text-ink"><X size={16} /></button>
+        </div>
+
+        {error && <p className="mt-5 text-sm text-marigold-deep">{error}</p>}
+
+        {details && (
+          <>
+            <DetailSection title="Account">
+              <dl>
+                <DetailRow label="Email">{account.email || '—'}</DetailRow>
+                <DetailRow label="Email confirmed">{account.email_confirmed_at ? 'Yes' : 'No'}</DetailRow>
+                <DetailRow label="Phone">{details.phone || '—'}</DetailRow>
+                <DetailRow label="Signed up">{formatDateTime(account.signed_up_at || profile.created_at)}</DetailRow>
+                <DetailRow label="Last sign-in">{formatDateTime(account.last_sign_in_at)}</DetailRow>
+                <DetailRow label="Last seen">{formatDateTime(profile.last_seen_at)}</DetailRow>
+                <DetailRow label="User ID"><span className="font-mono text-xs">{profile.id}</span></DetailRow>
+              </dl>
+            </DetailSection>
+
+            <DetailSection title="Standing">
+              <dl>
+                <DetailRow label="Role">{profile.role || 'user'}</DetailRow>
+                <DetailRow label="Status">{profile.status || 'active'}</DetailRow>
+                <DetailRow label="Seller">{profile.is_seller ? `Yes · level ${profile.seller_level ?? 0}` : 'No'}</DetailRow>
+                <DetailRow label="Verified seller">{profile.verified_seller ? 'Yes' : 'No'}</DetailRow>
+                <DetailRow label="Pro vendor">{profile.pro_vendor ? 'Yes' : 'No'}</DetailRow>
+                <DetailRow label="Warnings">{profile.warning_count ?? 0} of 3</DetailRow>
+                <DetailRow label="Reports against them">{details.reports_against} ({details.open_reports_against} open)</DetailRow>
+              </dl>
+            </DetailSection>
+
+            <DetailSection title="Money">
+              <div className="flex justify-end">
+                <BalanceToggle hidden={balancesHidden} onToggle={toggleBalances} className="border border-hairline text-muted hover:text-ink" />
+              </div>
+              <dl>
+                <DetailRow label="Wallet available">{formatBalance(profile.wallet_cleared, balancesHidden)}</DetailRow>
+                <DetailRow label="Wallet pending">{formatBalance(profile.wallet_pending, balancesHidden)}</DetailRow>
+                <DetailRow label="Confirmed seller payouts">{formatBalance(details.orders?.seller_payouts_confirmed, balancesHidden)}</DetailRow>
+                <DetailRow label="Payout account connected">{profile.payout_connected ? 'Yes' : 'No'}</DetailRow>
+              </dl>
+            </DetailSection>
+
+            <DetailSection title="Activity">
+              <dl>
+                <DetailRow label="Listings">{details.listings?.total ?? 0} ({details.listings?.live ?? 0} live)</DetailRow>
+                <DetailRow label="Orders as buyer">{details.orders?.as_buyer ?? 0}</DetailRow>
+                <DetailRow label="Orders as seller">{details.orders?.as_seller ?? 0}</DetailRow>
+                <DetailRow label="Completed sales">{profile.completed_sales_count ?? 0}</DetailRow>
+                <DetailRow label="Completed purchases">{profile.completed_purchases_count ?? 0}</DetailRow>
+              </dl>
+            </DetailSection>
+
+            <DetailSection title="Verification history">
+              {details.verification.length === 0 && <p className="text-sm text-muted">No verification requests.</p>}
+              <ul className="space-y-2">
+                {details.verification.map((request) => (
+                  <li key={request.id} className="rounded-lg bg-surfacealt p-3 text-sm">
+                    <p className="font-semibold capitalize text-ink">{request.status} · {request.id_type} ••••{request.id_number_last4 || '????'}</p>
+                    <p className="mt-1 text-xs text-muted">Submitted {formatDateTime(request.submitted_at)}{request.reviewed_at ? ` · reviewed ${formatDateTime(request.reviewed_at)}` : ''}</p>
+                    {request.rejection_reason && <p className="mt-1 text-xs text-marigold-deep">Reason: {request.rejection_reason}</p>}
+                    {request.document_deleted && <p className="mt-1 text-xs text-muted">Document deleted after rejection.</p>}
+                  </li>
+                ))}
+              </ul>
+            </DetailSection>
+
+            <DetailSection title="Warnings">
+              {details.warnings.length === 0 && <p className="text-sm text-muted">No warnings.</p>}
+              <ul className="space-y-2">
+                {details.warnings.map((warning, index) => (
+                  <li key={`${warning.issued_at}-${index}`} className="rounded-lg bg-surfacealt p-3 text-sm">
+                    <p className="text-ink">{warning.reason}</p>
+                    <p className="mt-1 text-xs text-muted">{formatDateTime(warning.issued_at)}</p>
+                  </li>
+                ))}
+              </ul>
+            </DetailSection>
+
+            <Link to={publicPath} target="_blank" rel="noreferrer" className="mt-5 inline-block rounded-full border border-ink px-4 py-2 font-mono text-xs text-ink hover:border-seal hover:text-seal">
+              View public profile
+            </Link>
+          </>
+        )}
+      </aside>
+    </div>
+  )
 }
 
 function AdminPromotions() {

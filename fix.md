@@ -149,5 +149,20 @@ How each fixed issue from [issues.md](issues.md) was solved. The numbers match t
 **8.8: Warnings**
 - **What changed:** issuing a warning is one database action (`admin_issue_warning`), with errors shown to the admin.
 
+**8.9: No user detail view**
+- **What changed:** **Users, sellers & buyers** now searches every user in the database by name, business name, handle, email or user ID, page by page. Typed `%` and `_` are matched literally. A new **Suspended** filter lists suspended accounts.
+- **Details panel:** selecting a person opens their full details:
+  - **Account:** email, whether it's confirmed, phone, sign-up date, last sign-in and last seen.
+  - **Standing:** role, status, seller level, badges, warnings and reports against them.
+  - **Money:** wallet balances (with the show/hide button), confirmed payouts and whether a payout account is connected.
+  - **Activity:** listings and orders.
+  - **History:** every verification request, with rejection reasons, and every warning.
+- **Admins only:** both lookups refuse anyone who isn't an admin.
+- **Where:** `Admin.jsx` (`ProfileDirectory`, `UserDetailsPanel`), `0034_admin_tools.sql`.
+
+**8.14: Rejection reason hidden from sellers**
+- **What changed:** the seller's verification panel now shows the reason the admin gave.
+- **Where:** `Sell.jsx`.
+
 **6.4: No migration history**
 - **What changed:** `supabase/all_migrations.sql` records each migration as it runs and skips it next time. You can paste the whole file into the SQL Editor whenever there's something new. See [update.md](update.md).
