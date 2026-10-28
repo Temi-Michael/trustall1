@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "db:bundle": "node scripts/bundle-migrations.mjs",
+    "db:bundle:check": "node scripts/bundle-migrations.mjs --check",
     "supabase:ensure-buckets": "node supabase/scripts/ensure_buckets.js",
     "supabase:deploy-upload-proxy": "supabase functions deploy upload-proxy",
     "supabase:deploy-ai-matchmaker": "supabase functions deploy ai-matchmaker"

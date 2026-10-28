@@ -1058,7 +1058,7 @@ function OfferCard({ offer, isSeller, userId, buyerEmail, sellerRecipientCode })
       console.error('Failed to share delivery address:', error)
       setAddressError(
         error.code === 'PGRST202' || error.code === '42883'
-          ? 'Delivery address sharing is not enabled yet. Ask the Trustall admin to apply Supabase migration 0025_share_offer_delivery_address.sql, then try again.'
+          ? 'Delivery address sharing is not enabled yet. Ask the Trustall admin to apply Supabase migration 0026_share_offer_delivery_address.sql, then try again.'
           : error.message || 'Could not share your address. Please try again.'
       )
     } finally {

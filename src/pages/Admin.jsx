@@ -814,7 +814,7 @@ function AdminOverview({ onNavigate }) {
     const { data: overview, error: overviewError } = await supabase.rpc('get_admin_dashboard', { p_since: since, p_limit: ADMIN_PAGE_SIZE })
     if (overviewError) {
       setError(overviewError.code === 'PGRST202'
-        ? 'Admin analytics is not deployed yet. Apply supabase/migrations/0020_admin_dashboard_audit.sql in Supabase SQL Editor, then reload this page.'
+        ? 'Admin analytics is not deployed yet. Apply supabase/migrations/0021_admin_dashboard_audit.sql in Supabase SQL Editor, then reload this page.'
         : overviewError.message || 'Dashboard data could not be loaded.')
       setLoading(false)
       return

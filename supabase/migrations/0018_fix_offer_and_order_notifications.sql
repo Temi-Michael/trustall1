@@ -115,5 +115,14 @@ create trigger trg_notify_order_confirmed
   for each row
   execute function public.notify_order_confirmed();
 
--- Ensure notifications table is published for real-time
-alter publication supabase_realtime add table if not exists public.notifications;
+-- Ensure notifications table is published for real-time. Postgres has no
+-- ADD TABLE IF NOT EXISTS, so check first.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'notifications'
+  ) then
+    alter publication supabase_realtime add table public.notifications;
+  end if;
+end $$;
