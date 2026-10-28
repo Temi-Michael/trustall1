@@ -8,6 +8,10 @@ import { LISTING_CATEGORIES } from '../lib/listingCategories.js'
 import ServiceGigWizard from '../components/ServiceGigWizard.jsx'
 import { NIGERIAN_BANKS } from '../lib/nigerianBanks.js'
 import { safeFileName } from '../lib/inputSafety.js'
+import { PUBLIC_PROFILE_COLUMNS } from '../lib/profileFields.js'
+import { useBalanceVisibility } from '../lib/useBalanceVisibility.js'
+import { formatBalance } from '../lib/balanceDisplay.js'
+import BalanceToggle from '../components/BalanceToggle.jsx'
 
 async function uploadAvatar(file, userId) {
   if (!file) return null
@@ -133,6 +137,7 @@ export default function Sell() {
 }
 
 function SellerSalesOverview({ salesSummary, loadingSales, profile }) {
+  const { hidden: balancesHidden, toggle: toggleBalances } = useBalanceVisibility()
   return (
     <section className="seller-panel mt-8 overflow-hidden bg-gradient-to-br from-seal via-[#24654d] to-[#1a4637] p-5 text-white shadow-[0_24px_60px_rgba(31,77,56,0.2)] sm:p-6">
       <div className="flex items-center justify-between gap-3">
@@ -140,16 +145,19 @@ function SellerSalesOverview({ salesSummary, loadingSales, profile }) {
           <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-seal-light">Overview</p>
           <h2 className="mt-2 font-display text-xl font-bold sm:text-2xl">Your business at a glance</h2>
         </div>
-        <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-white/90">
-          Live
-        </span>
+        <div className="flex items-center gap-2">
+          <BalanceToggle hidden={balancesHidden} onToggle={toggleBalances} className="border border-white/20 bg-white/10 text-white/90 hover:bg-white/20" />
+          <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-white/90">
+            Live
+          </span>
+        </div>
       </div>
 
       <div className="mt-5 grid divide-y divide-white/15 border-t border-white/15 sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
         <div className="py-4 sm:px-4 sm:first:pl-0">
           <p className="font-mono text-[10px] uppercase tracking-[0.26em] text-white/70">Revenue</p>
           <p className="mt-2 font-display text-2xl font-bold text-white">
-            {loadingSales ? '…' : `₦${Number(salesSummary.totalRevenue || 0).toLocaleString()}`}
+            {loadingSales ? '…' : formatBalance(salesSummary.totalRevenue, balancesHidden)}
           </p>
         </div>
         <div className="py-4 sm:px-4">
@@ -167,7 +175,7 @@ function SellerSalesOverview({ salesSummary, loadingSales, profile }) {
         <div className="py-4 sm:px-4 sm:last:pr-0">
           <p className="font-mono text-[10px] uppercase tracking-[0.26em] text-white/80">Available</p>
           <p className="mt-2 font-display text-2xl font-bold text-marigold-soft">
-            {loadingSales ? '…' : `₦${Number(profile?.wallet_cleared || 0).toLocaleString()}`}
+            {loadingSales ? '…' : formatBalance(profile?.wallet_cleared, balancesHidden)}
           </p>
         </div>
       </div>
@@ -314,7 +322,7 @@ function ProfileSetup({ profile, setProfile, session }) {
       .from('profiles')
       .update({ business_name: businessName, handle: cleanHandle, state, bio: bio.trim(), avatar_url: avatarUrl })
       .eq('id', session.user.id)
-      .select()
+      .select(PUBLIC_PROFILE_COLUMNS)
       .single()
     if (error) {
       setSaving(false)
@@ -330,7 +338,8 @@ function ProfileSetup({ profile, setProfile, session }) {
       setError(contactError.code === '23514' ? 'Enter a valid phone number: digits, spaces, + and - only.' : contactError.message)
       return
     }
-    setProfile({ ...data, phone: phone.trim() })
+    // Merge: the update only returns public columns, so keep the private ones already loaded.
+    setProfile((current) => ({ ...current, ...data, phone: phone.trim() }))
     setSaved(true)
   }
 

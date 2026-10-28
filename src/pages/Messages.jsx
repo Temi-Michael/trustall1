@@ -455,7 +455,7 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
   async function loadThread() {
     const { data: convo } = await supabase
       .from('conversations')
-      .select('*, listing:listing_id(id, title, price, images, slug), buyer:buyer_id(id, business_name, full_name, avatar_url, verified_seller), seller:seller_id(id, business_name, full_name, avatar_url, verified_seller, paystack_recipient_code)')
+      .select('*, listing:listing_id(id, title, price, images, slug), buyer:buyer_id(id, business_name, full_name, avatar_url, verified_seller), seller:seller_id(id, business_name, full_name, avatar_url, verified_seller, payout_connected)')
       .eq('id', conversationId).single()
     setConversation(convo)
 
@@ -727,7 +727,7 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
               conversationId={conversationId}
               userId={userId}
               buyerEmail={userEmail}
-              sellerRecipientCode={conversation?.seller?.paystack_recipient_code}
+              sellerPayoutConnected={Boolean(conversation?.seller?.payout_connected)}
             />
           ) : (
             <MessageBubble
@@ -1020,7 +1020,7 @@ function MessageBubble({ message, isMine, attachments = [], onEdit, onDelete }) 
   )
 }
 
-function OfferCard({ offer, isSeller, userId, buyerEmail, sellerRecipientCode }) {
+function OfferCard({ offer, isSeller, userId, buyerEmail, sellerPayoutConnected }) {
   const navigate = useNavigate()
   const [paying, setPaying] = useState(false)
   const [deliveryAddress, setDeliveryAddress] = useState(offer.delivery_address || '')
@@ -1033,7 +1033,7 @@ function OfferCard({ offer, isSeller, userId, buyerEmail, sellerRecipientCode })
   const sellerFee = Math.min(itemTotal * 0.05, 5000) // 5%, capped at ₦5,000
   const buyerFee = 100 // flat escrow protection fee
   const totalCharged = itemTotal + buyerFee
-  const hasConnectedPayout = Boolean(sellerRecipientCode)
+  const hasConnectedPayout = sellerPayoutConnected
 
   async function shareDeliveryAddress() {
     const cleanAddress = deliveryAddress.trim()

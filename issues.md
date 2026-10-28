@@ -22,7 +22,7 @@ Every problem found in the Trustall codebase during the October 2026 review, fix
 | 1.1 | **Anyone could make themselves an admin.** Users could edit every column of their own profile, including `role`, so one browser-console command gave full admin access. | 🔴 | ✅ |
 | 1.2 | **Users could edit their own wallet balance, verified badge, seller level and warning count** through the same open profile update. | 🔴 | ✅ |
 | 1.3 | **The admin page is only hidden in the browser.** The check in `Admin.jsx` is a screen-level guard, so real protection depends entirely on database rules, including for tables that only exist on the live database and can't be checked from the code. | 🟡 | ⏳ |
-| 1.4 | **The profiles table is still readable by anyone**, including wallet balances, warning counts, Paystack codes and referral data. | 🟠 | ⏳ |
+| 1.4 | **The profiles table was readable by anyone**, including wallet balances, warning counts, Paystack codes and referral data. | 🟠 | ✅ |
 
 ## 2. Personal data
 
@@ -85,7 +85,7 @@ Every problem found in the Trustall codebase during the October 2026 review, fix
 | 6.4 | **There was no record of which migrations had been applied**, so pasting them into the SQL Editor was guesswork. | 🟡 | ✅ |
 | 6.5 | **Many live tables and functions aren't in the repository**: `promotions`, `payout_transfers`, `device_tokens`, `tags`, `update_last_seen`, `search_listings_ranked`, `resolve_dispute_favor_seller` and others. Their security rules can't be reviewed, and a fresh database can't run the full app. | 🟠 | ⏳ |
 | 6.6 | **Six server functions exist only on Supabase**, not in this repository, so they are unreviewed: `paystack-process-payout`, `paystack-verify-promotion-payment`, `resolve-dispute-refund-buyer`, `paystack-create-platform-recipient`, `paystack-withdraw-platform-earnings` and `moderate-chat-image`. | 🟠 | ⏳ |
-| 6.7 | **Live-only code may now be blocked.** Any of it that changes orders or profiles without elevated rights will be refused by the new rules. Filing a dispute should be tested in particular. | 🟡 | ⏳ |
+| 6.7 | **Live-only code may now be blocked.** Any of it that changes orders or profiles without elevated rights will be refused by the new rules, and so will any that reads profiles with `select('*')` or reads a hidden field such as `wallet_cleared`. Filing a dispute and withdrawing from the wallet should be tested in particular. | 🟡 | ⏳ |
 
 ## 7. Housekeeping
 

@@ -61,13 +61,10 @@ export function useProfile() {
     setProfile(null)
     setLoading(true)
 
-    // Phone numbers live in profile_contacts, which only the owner and admins can read.
+    // Private fields (wallet, payout codes, referral code) are only readable through
+    // get_my_profile; phone numbers live in profile_contacts. Both are owner-only.
     Promise.all([
-      supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .maybeSingle(),
+      supabase.rpc('get_my_profile').maybeSingle(),
       supabase
         .from('profile_contacts')
         .select('phone')

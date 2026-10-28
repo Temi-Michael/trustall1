@@ -52,10 +52,22 @@ TRUST-PAY-YBENA62B67JS
 
 `npm run db:bundle:check` reports if `all_migrations.sql` is out of date.
 
-## 3. Other additions
+## 3. Hide balances
+
+Users can hide their money amounts, like in a banking app. An eye button next to the balances switches them to `₦ ••••••`. The mask is always the same length, so it doesn't hint at the size of the real number.
+
+- **Where:** the seller dashboard (Revenue and Available) and the Refer page (Cleared and Pending).
+- **Remembered per device:** the choice survives reloads and applies to every balance on screen and in other tabs.
+- **For developers:** use `useBalanceVisibility()` with `formatBalance(amount, hidden)` and `<BalanceToggle />` to add it anywhere else.
+
+## 4. Other additions
 
 | What | Where | What it does |
 |---|---|---|
+| Private profile fields | `0033_private_profile_fields.sql` | Hides wallets, payout codes, warnings and referral data from the public (see [fix.md](fix.md) 1.4). |
+| `get_my_profile()` / `admin_get_profiles()` | Database functions | How the owner and admins read the hidden fields. |
+| `payout_connected` | `profiles` column | Public yes/no showing whether a seller can be paid, without revealing the payout code. |
+| Public column list | `src/lib/profileFields.js` | Use `select(PUBLIC_PROFILE_COLUMNS)` for other people's profiles. `select('*')` on `profiles` no longer works, because it asks for hidden columns. |
 | **Reveal ID** button | Admin → Seller verification | Shows a seller's full ID number on request. Only admins can use it. |
 | Private contact details | `profile_contacts` table | Holds phone numbers away from the public profile. |
 | Mark as delivered | `mark_order_fulfilled()` | The safe way for a seller to mark an order delivered. |
@@ -65,7 +77,13 @@ TRUST-PAY-YBENA62B67JS
 | `disputes` migration | `0020_disputes_table.sql` | Lets a fresh database be built from migrations alone. |
 | Storage limits | `0032_input_constraints.sql` | File size and type limits for each upload bucket. |
 
-## 4. Rolling this out
+**Adding a new public profile column:** add a grant to its migration, or nobody will be able to read it:
+
+```sql
+grant select (new_column) on public.profiles to anon, authenticated;
+```
+
+## 5. Rolling this out
 
 1. **Database:** paste `supabase/all_migrations.sql` into the Supabase SQL Editor and click **Run**.
 2. **Server functions:** deploy the changed ones:

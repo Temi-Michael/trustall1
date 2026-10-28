@@ -43,7 +43,7 @@ export default function Account() {
         .from('profiles')
         .update({ avatar_url: avatarUrl })
         .eq('id', session.user.id)
-        .select()
+        .select('avatar_url')
         .single()
       if (updateError) throw updateError
       URL.revokeObjectURL(previewUrl)

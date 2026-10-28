@@ -11,6 +11,21 @@ How each fixed issue from [issues.md](issues.md) was solved. The numbers match t
 - **How:** a guard runs before every profile update and compares the old and new row. It works from a list of allowed fields, so columns added later are protected automatically. Admins and the database's own functions are unaffected.
 - **Where:** `0028_security_lockdown.sql`, `guard_profile_self_update()`.
 
+**1.4: Private profile fields were public**
+- **Now hidden** (only the owner and admins can see them):
+
+  | Field | Why it's private |
+  |---|---|
+  | `wallet_pending`, `wallet_cleared` | Money in the user's wallet |
+  | `paystack_subaccount_code`, `paystack_recipient_code` | Payout account identifiers |
+  | `warning_count` | Moderation history |
+  | `referral_code`, `referred_by` | Who referred whom |
+  | Any `wallet_*`, `paystack_*`, `bank_*`, `account_*`, `bvn` or `nin` column that exists only on the live database | Same reasons; caught by name pattern |
+
+- **Still public, on purpose:** names, handle, location, bio, photo, badges, ratings and sales counts, which build buyer trust. `status` stays too, because the home page uses it to hide suspended sellers. So do `role` and `is_dispute_judge`, because the dispute page uses them to list judges.
+- **How:** the database only lets the public read the allowed columns. You read your own full profile through `get_my_profile()`, and admins read anyone's through `admin_get_profiles()`. Checkout only needs to know whether a seller can be paid, so it now uses a yes/no field, `payout_connected`, instead of the seller's payout code.
+- **Where:** `0033_private_profile_fields.sql`, `src/lib/profileFields.js`, `useProfile.js`, `SellerProfile.jsx`, `Messages.jsx`, `Admin.jsx`.
+
 ## 2. Personal data
 
 **2.1: Phone numbers were public**

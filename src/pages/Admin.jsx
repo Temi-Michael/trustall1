@@ -1661,10 +1661,19 @@ function ReportsQueue() {
     setLoading(true)
     const { data } = await supabase
       .from('reports')
-      .select('*, reporter:reporter_id(business_name, full_name), reported:reported_id(id, business_name, full_name, warning_count, status)')
+      .select('*, reporter:reporter_id(business_name, full_name), reported:reported_id(id, business_name, full_name, status)')
       .in('status', ['open', 'reviewing'])
       .order('created_at', { ascending: true })
-    setReports(data || [])
+
+    // warning_count is private; admins read it through admin_get_profiles.
+    const reportedIds = [...new Set((data || []).map((report) => report.reported?.id).filter(Boolean))]
+    const { data: privateRows } = reportedIds.length
+      ? await supabase.rpc('admin_get_profiles', { p_ids: reportedIds })
+      : { data: [] }
+    const warningsById = new Map((privateRows || []).map((row) => [row.id, row.warning_count]))
+    setReports((data || []).map((report) => report.reported
+      ? { ...report, reported: { ...report.reported, warning_count: warningsById.get(report.reported.id) ?? 0 } }
+      : report))
     setLoading(false)
   }
 
