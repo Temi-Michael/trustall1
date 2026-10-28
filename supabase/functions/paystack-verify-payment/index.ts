@@ -27,12 +27,26 @@ Deno.serve(async (req) => {
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
+    // The reference must have been issued to this buyer for this offer and not used yet.
+    const { data: issued } = await admin
+      .from('transaction_references')
+      .select('reference')
+      .eq('reference', reference)
+      .eq('kind', 'order_payment')
+      .eq('owner_id', user.id)
+      .eq('subject_id', offer_id)
+      .is('consumed_at', null)
+      .maybeSingle();
+    if (!issued) {
+      return new Response(JSON.stringify({ error: 'Unknown or already used payment reference' }), { status: 400, headers: corsHeaders });
+    }
+
     const paystackSecret = Deno.env.get('PAYSTACK_SECRET_KEY');
     if (!paystackSecret) {
       return new Response(JSON.stringify({ error: 'Paystack is not configured yet on the server.' }), { status: 500, headers: corsHeaders });
     }
 
-    const verifyRes = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
+    const verifyRes = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
       headers: { 'Authorization': `Bearer ${paystackSecret}` },
     });
     const verifyData = await verifyRes.json();
@@ -92,6 +106,7 @@ Deno.serve(async (req) => {
     }
 
     await admin.from('offers').update({ status: 'accepted' }).eq('id', offer.id);
+    await admin.from('transaction_references').update({ consumed_at: new Date().toISOString() }).eq('reference', reference);
 
     return new Response(JSON.stringify({ success: true, order }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

@@ -1081,7 +1081,7 @@ function OfferCard({ offer, isSeller, userId, buyerEmail, sellerRecipientCode })
     navigate(order?.id ? `/orders/${order.id}` : '/orders')
   }
 
-  function acceptAndPay() {
+  async function acceptAndPay() {
     if (!window.PaystackPop) {
       alert("Payment isn't available right now — please refresh and try again.")
       return
@@ -1091,12 +1091,19 @@ function OfferCard({ offer, isSeller, userId, buyerEmail, sellerRecipientCode })
       return
     }
     setPaying(true)
+    // References are issued server-side (TRUST-ORD-XXXXXXXX) and can only be used once.
+    const { data: reference, error: referenceError } = await supabase.rpc('issue_order_payment_reference', { p_offer_id: offer.id })
+    if (referenceError || !reference) {
+      setPaying(false)
+      alert(referenceError?.message || "Couldn't start checkout. Please try again.")
+      return
+    }
     const handler = window.PaystackPop.setup({
       key: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY,
       email: buyerEmail,
       amount: Math.round(totalCharged * 100), // kobo — buyer's full charge, including the ₦100 fee
       currency: 'NGN',
-      ref: `trustall_${offer.id}_${Date.now()}`,
+      ref: reference,
       bearer: 'account', // Trustall's main account bears the Paystack processing fee, not the seller
       callback: (response) => {
         ;(async () => {
