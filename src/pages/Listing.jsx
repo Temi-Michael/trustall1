@@ -119,7 +119,7 @@ export default function Listing() {
         
         const { data, error: fetchError } = await supabase
           .from('listings')
-          .select('*, seller:seller_id(id, business_name, handle, state, verified_seller, seller_level, pro_vendor, avg_rating, completed_sales_count, total_sales_volume)')
+          .select('*, seller:seller_id(id, business_name, handle, state, verified_seller, seller_level, pro_vendor, avg_rating, completed_sales_count)')
           .eq('slug', slug)
           .maybeSingle()
 
@@ -440,14 +440,9 @@ export default function Listing() {
               <p className="font-mono text-xs text-muted">
                 {listing.seller?.state} · {listing.seller?.avg_rating ? `${Number(listing.seller.avg_rating).toFixed(1)}★` : 'No reviews yet'}
               </p>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-seal/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-seal">
-                  {Number(listing.seller?.completed_sales_count || 0)} sales
-                </span>
-                <span className="rounded-full bg-ink/5 px-2 py-0.5 font-mono text-[10px] font-semibold text-ink">
-                  ₦{Number(listing.seller?.total_sales_volume || 0).toLocaleString()} total
-                </span>
-              </div>
+              <span className="mt-2 inline-flex rounded-full bg-seal/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-seal">
+                {Number(listing.seller?.completed_sales_count || 0)} total sales
+              </span>
             </div>
           </Link>
 

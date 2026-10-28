@@ -455,7 +455,7 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
   async function loadThread() {
     const { data: convo } = await supabase
       .from('conversations')
-      .select('*, listing:listing_id(id, title, price, images, slug), buyer:buyer_id(id, business_name, full_name, avatar_url, verified_seller), seller:seller_id(id, business_name, full_name, avatar_url, verified_seller, paystack_recipient_code)')
+      .select('*, listing:listing_id(id, title, price, images, slug), buyer:buyer_id(id, business_name, full_name, avatar_url, verified_seller), seller:seller_id(id, business_name, full_name, avatar_url, verified_seller, payout_connected)')
       .eq('id', conversationId).single()
     setConversation(convo)
 
@@ -568,7 +568,7 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
       if (selectedFiles.length > 0) {
         const rows = []
         for (const [index, file] of selectedFiles.entries()) {
-          const path = `${conversationId}/${Date.now()}_${index}_${file.name.replace(/\s+/g, '_')}`
+          const path = `${conversationId}/${Date.now()}_${index}_${safeFileName(file.name)}`
           const { error: uploadError } = await supabase.storage.from('message-attachments').upload(path, file, { upsert: true })
           if (uploadError) throw uploadError
 
@@ -727,7 +727,7 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
               conversationId={conversationId}
               userId={userId}
               buyerEmail={userEmail}
-              sellerRecipientCode={conversation?.seller?.paystack_recipient_code}
+              sellerPayoutConnected={Boolean(conversation?.seller?.payout_connected)}
             />
           ) : (
             <MessageBubble
@@ -1020,7 +1020,7 @@ function MessageBubble({ message, isMine, attachments = [], onEdit, onDelete }) 
   )
 }
 
-function OfferCard({ offer, isSeller, userId, buyerEmail, sellerRecipientCode }) {
+function OfferCard({ offer, isSeller, userId, buyerEmail, sellerPayoutConnected }) {
   const navigate = useNavigate()
   const [paying, setPaying] = useState(false)
   const [deliveryAddress, setDeliveryAddress] = useState(offer.delivery_address || '')
@@ -1033,7 +1033,7 @@ function OfferCard({ offer, isSeller, userId, buyerEmail, sellerRecipientCode })
   const sellerFee = Math.min(itemTotal * 0.05, 5000) // 5%, capped at ₦5,000
   const buyerFee = 100 // flat escrow protection fee
   const totalCharged = itemTotal + buyerFee
-  const hasConnectedPayout = Boolean(sellerRecipientCode)
+  const hasConnectedPayout = sellerPayoutConnected
 
   async function shareDeliveryAddress() {
     const cleanAddress = deliveryAddress.trim()
@@ -1058,7 +1058,7 @@ function OfferCard({ offer, isSeller, userId, buyerEmail, sellerRecipientCode })
       console.error('Failed to share delivery address:', error)
       setAddressError(
         error.code === 'PGRST202' || error.code === '42883'
-          ? 'Delivery address sharing is not enabled yet. Ask the Trustall admin to apply Supabase migration 0025_share_offer_delivery_address.sql, then try again.'
+          ? 'Delivery address sharing is not enabled yet. Ask the Trustall admin to apply Supabase migration 0026_share_offer_delivery_address.sql, then try again.'
           : error.message || 'Could not share your address. Please try again.'
       )
     } finally {
@@ -1081,7 +1081,7 @@ function OfferCard({ offer, isSeller, userId, buyerEmail, sellerRecipientCode })
     navigate(order?.id ? `/orders/${order.id}` : '/orders')
   }
 
-  function acceptAndPay() {
+  async function acceptAndPay() {
     if (!window.PaystackPop) {
       alert("Payment isn't available right now — please refresh and try again.")
       return
@@ -1091,12 +1091,19 @@ function OfferCard({ offer, isSeller, userId, buyerEmail, sellerRecipientCode })
       return
     }
     setPaying(true)
+    // References are issued server-side (e.g. TRUST-ORD-YBENA62B67JS) and can only be used once.
+    const { data: reference, error: referenceError } = await supabase.rpc('issue_order_payment_reference', { p_offer_id: offer.id })
+    if (referenceError || !reference) {
+      setPaying(false)
+      alert(referenceError?.message || "Couldn't start checkout. Please try again.")
+      return
+    }
     const handler = window.PaystackPop.setup({
       key: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY,
       email: buyerEmail,
       amount: Math.round(totalCharged * 100), // kobo — buyer's full charge, including the ₦100 fee
       currency: 'NGN',
-      ref: `trustall_${offer.id}_${Date.now()}`,
+      ref: reference,
       bearer: 'account', // Trustall's main account bears the Paystack processing fee, not the seller
       callback: (response) => {
         ;(async () => {

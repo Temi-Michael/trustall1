@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "db:bundle": "node scripts/bundle-migrations.mjs",
+    "db:bundle:check": "node scripts/bundle-migrations.mjs --check",
     "supabase:ensure-buckets": "node supabase/scripts/ensure_buckets.js",
     "supabase:deploy-upload-proxy": "supabase functions deploy upload-proxy",
     "supabase:deploy-ai-matchmaker": "supabase functions deploy ai-matchmaker"
@@ -16,6 +18,7 @@
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
     "caniuse-lite": "1.0.30001809",
+    "dompurify": "^3.2.6",
     "firebase": "^12.17.1",
     "lucide-react": "^1.30.0",
     "react": "^18.3.1",

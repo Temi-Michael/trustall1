@@ -11,7 +11,7 @@ async function main() {
   const supabase = createClient(url, key)
   const buckets = [
     { name: 'avatars', public: true },
-    { name: 'message-attachments', public: true },
+    { name: 'message-attachments', public: false },
   ]
   for (const b of buckets) {
     try {

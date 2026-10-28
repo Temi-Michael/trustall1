@@ -7,10 +7,15 @@ import { ensureNotificationPermission, notifyConversationEvent } from '../lib/no
 import { LISTING_CATEGORIES } from '../lib/listingCategories.js'
 import ServiceGigWizard from '../components/ServiceGigWizard.jsx'
 import { NIGERIAN_BANKS } from '../lib/nigerianBanks.js'
+import { safeFileName } from '../lib/inputSafety.js'
+import { PUBLIC_PROFILE_COLUMNS } from '../lib/profileFields.js'
+import { useBalanceVisibility } from '../lib/useBalanceVisibility.js'
+import { formatBalance } from '../lib/balanceDisplay.js'
+import BalanceToggle from '../components/BalanceToggle.jsx'
 
 async function uploadAvatar(file, userId) {
   if (!file) return null
-  const path = `${userId}/${Date.now()}-${file.name}`
+  const path = `${userId}/${Date.now()}-${safeFileName(file.name)}`
   const { error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true })
   if (error) {
     console.error('Avatar upload error:', error)
@@ -132,6 +137,7 @@ export default function Sell() {
 }
 
 function SellerSalesOverview({ salesSummary, loadingSales, profile }) {
+  const { hidden: balancesHidden, toggle: toggleBalances } = useBalanceVisibility()
   return (
     <section className="seller-panel mt-8 overflow-hidden bg-gradient-to-br from-seal via-[#24654d] to-[#1a4637] p-5 text-white shadow-[0_24px_60px_rgba(31,77,56,0.2)] sm:p-6">
       <div className="flex items-center justify-between gap-3">
@@ -139,16 +145,19 @@ function SellerSalesOverview({ salesSummary, loadingSales, profile }) {
           <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-seal-light">Overview</p>
           <h2 className="mt-2 font-display text-xl font-bold sm:text-2xl">Your business at a glance</h2>
         </div>
-        <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-white/90">
-          Live
-        </span>
+        <div className="flex items-center gap-2">
+          <BalanceToggle hidden={balancesHidden} onToggle={toggleBalances} className="border border-white/20 bg-white/10 text-white/90 hover:bg-white/20" />
+          <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-white/90">
+            Live
+          </span>
+        </div>
       </div>
 
       <div className="mt-5 grid divide-y divide-white/15 border-t border-white/15 sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
         <div className="py-4 sm:px-4 sm:first:pl-0">
           <p className="font-mono text-[10px] uppercase tracking-[0.26em] text-white/70">Revenue</p>
           <p className="mt-2 font-display text-2xl font-bold text-white">
-            {loadingSales ? '…' : `₦${Number(salesSummary.totalRevenue || 0).toLocaleString()}`}
+            {loadingSales ? '…' : formatBalance(salesSummary.totalRevenue, balancesHidden)}
           </p>
         </div>
         <div className="py-4 sm:px-4">
@@ -166,7 +175,7 @@ function SellerSalesOverview({ salesSummary, loadingSales, profile }) {
         <div className="py-4 sm:px-4 sm:last:pr-0">
           <p className="font-mono text-[10px] uppercase tracking-[0.26em] text-white/80">Available</p>
           <p className="mt-2 font-display text-2xl font-bold text-marigold-soft">
-            {loadingSales ? '…' : `₦${Number(profile?.wallet_cleared || 0).toLocaleString()}`}
+            {loadingSales ? '…' : formatBalance(profile?.wallet_cleared, balancesHidden)}
           </p>
         </div>
       </div>
@@ -215,16 +224,10 @@ function SellerOrderManager({ session }) {
     setBusyOrderId(orderId)
 
     try {
-      const { error } = await supabase
-        .from('orders')
-        .update({
-          fulfilled_at: new Date().toISOString(),
-          status: 'fulfilled',
-        })
-        .eq('id', orderId)
-        .eq('seller_id', session.user.id)
+      const { data, error } = await supabase.rpc('mark_order_fulfilled', { p_order_id: orderId })
 
       if (error) throw error
+      if (!data?.success) throw new Error(data?.error || 'Failed to mark as delivered.')
 
       setOrders((prev) => prev.map((order) => order.id === orderId
         ? { ...order, status: 'fulfilled', fulfilled_at: new Date().toISOString() }
@@ -317,16 +320,26 @@ function ProfileSetup({ profile, setProfile, session }) {
     }
     const { data, error } = await supabase
       .from('profiles')
-      .update({ business_name: businessName, handle: cleanHandle, state, phone, bio: bio.trim(), avatar_url: avatarUrl })
+      .update({ business_name: businessName, handle: cleanHandle, state, bio: bio.trim(), avatar_url: avatarUrl })
       .eq('id', session.user.id)
-      .select()
+      .select(PUBLIC_PROFILE_COLUMNS)
       .single()
-    setSaving(false)
     if (error) {
+      setSaving(false)
       setError(error.message.includes('duplicate') ? 'That handle is already taken — try another.' : error.message)
       return
     }
-    setProfile(data)
+    const { error: contactError } = await supabase
+      .from('profile_contacts')
+      .upsert({ id: session.user.id, phone: phone.trim(), updated_at: new Date().toISOString() })
+    setSaving(false)
+    if (contactError) {
+      // 23514: the database's phone format check rejected the number.
+      setError(contactError.code === '23514' ? 'Enter a valid phone number: digits, spaces, + and - only.' : contactError.message)
+      return
+    }
+    // Merge: the update only returns public columns, so keep the private ones already loaded.
+    setProfile((current) => ({ ...current, ...data, phone: phone.trim() }))
     setSaved(true)
   }
 
@@ -419,7 +432,7 @@ function VerificationBlock({ profile, session }) {
     setSubmitting(true)
     setError('')
 
-    const path = `${session.user.id}/${Date.now()}-${file.name}`
+    const path = `${session.user.id}/${Date.now()}-${safeFileName(file.name)}`
     const { error: uploadError } = await supabase.storage.from('verification-docs').upload(path, file)
     if (uploadError) { setSubmitting(false); setError(uploadError.message); return }
 
@@ -469,7 +482,7 @@ function VerificationBlock({ profile, session }) {
       </p>
       {existing?.status === 'rejected' && (
         <p className="mt-2 text-sm text-marigold-deep">
-          Your last submission wasn't approved — please check your details and try again.
+          Your last submission wasn't approved{existing.rejection_reason ? `: ${existing.rejection_reason}` : ''}. Please check your details and try again.
         </p>
       )}
       <form onSubmit={submit} className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -654,7 +667,7 @@ function ListingsBlock({ profile, session }) {
 
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index]
-      const filePath = `${session.user.id}/${listingId}/${Date.now()}_${index}_${file.name.replace(/\s+/g, '_')}`
+      const filePath = `${session.user.id}/${listingId}/${Date.now()}_${index}_${safeFileName(file.name)}`
       const { error: uploadError } = await supabase.storage.from('listing-images').upload(filePath, file, { upsert: true })
       if (uploadError) throw uploadError
       const { data: publicData } = supabase.storage.from('listing-images').getPublicUrl(filePath)
@@ -679,7 +692,7 @@ function ListingsBlock({ profile, session }) {
 
     let imageUrl = null
     if (file) {
-      const path = `${session.user.id}/${Date.now()}-${file.name}`
+      const path = `${session.user.id}/${Date.now()}-${safeFileName(file.name)}`
       const { error: uploadError } = await supabase.storage.from('listing-images').upload(path, file)
       if (uploadError) throw uploadError
       const { data: pub } = supabase.storage.from('listing-images').getPublicUrl(path)
@@ -690,7 +703,7 @@ function ListingsBlock({ profile, session }) {
     if (productType === 'digital_instant') {
       if (!digitalFile && !editingId) throw new Error('Please attach the file buyers will receive.')
       if (digitalFile) {
-        digitalFilePath = `${session.user.id}/${Date.now()}-${digitalFile.name}`
+        digitalFilePath = `${session.user.id}/${Date.now()}-${safeFileName(digitalFile.name)}`
         const { error: digitalUploadError } = await supabase.storage.from('digital-products').upload(digitalFilePath, digitalFile)
         if (digitalUploadError) throw digitalUploadError
       }
@@ -785,7 +798,7 @@ function ListingsBlock({ profile, session }) {
 
     await ensureNotificationPermission()
     await notifyConversationEvent({
-      recipientEmail: session.user.email,
+      emailSelf: true,
       title: editingId ? 'Listing updated' : 'New listing published',
       body: editingId ? 'Your listing has been updated on Trustall.' : 'Your new listing is now live on Trustall.',
       preview: editingId ? 'Your listing has been updated on Trustall.' : 'Your new listing is now live on Trustall.',

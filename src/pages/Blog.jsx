@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient.js'
+import { sanitizeHtml } from '../lib/sanitizeHtml.js'
 
 function slugify(value) {
   return String(value || '')
@@ -27,7 +28,7 @@ function RichTextEditor({ value, onChange, placeholder = 'Start writing…' }) {
   useEffect(() => {
     if (!editorRef.current) return
     if (editorRef.current.innerHTML !== value) {
-      editorRef.current.innerHTML = value || ''
+      editorRef.current.innerHTML = sanitizeHtml(value)
     }
   }, [value])
 
@@ -237,7 +238,7 @@ export function BlogPost() {
 
       {post.excerpt && <p className="mt-4 max-w-2xl text-base leading-relaxed text-muted">{post.excerpt}</p>}
 
-      <div className="mt-10 prose prose-slate max-w-none text-base leading-8 text-ink prose-headings:font-display prose-headings:text-ink prose-p:text-ink prose-p:leading-8 prose-a:text-seal prose-strong:text-ink prose-blockquote:border-l-seal prose-blockquote:text-muted" dangerouslySetInnerHTML={{ __html: post.content || '' }} />
+      <div className="mt-10 prose prose-slate max-w-none text-base leading-8 text-ink prose-headings:font-display prose-headings:text-ink prose-p:text-ink prose-p:leading-8 prose-a:text-seal prose-strong:text-ink prose-blockquote:border-l-seal prose-blockquote:text-muted" dangerouslySetInnerHTML={{ __html: sanitizeHtml(post.content) }} />
     </article>
   )
 }

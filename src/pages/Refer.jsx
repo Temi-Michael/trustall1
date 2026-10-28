@@ -2,12 +2,16 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient.js'
 import { useProfile } from '../lib/useProfile.js'
+import { useBalanceVisibility } from '../lib/useBalanceVisibility.js'
+import { formatBalance } from '../lib/balanceDisplay.js'
+import BalanceToggle from '../components/BalanceToggle.jsx'
 
 export default function Refer() {
   const { session, profile, loading } = useProfile()
   const navigate = useNavigate()
   const [bonuses, setBonuses] = useState([])
   const [copied, setCopied] = useState(false)
+  const { hidden: balancesHidden, toggle: toggleBalances } = useBalanceVisibility()
 
   useEffect(() => {
     if (!loading && !session) navigate('/auth', { state: { redirectTo: '/refer' } })
@@ -63,13 +67,16 @@ export default function Refer() {
         Share on WhatsApp
       </a>
 
-      <div className="mt-12 grid grid-cols-2 gap-4">
+      <div className="mt-12 flex justify-end">
+        <BalanceToggle hidden={balancesHidden} onToggle={toggleBalances} className="border border-hairline text-muted hover:border-ink hover:text-ink" />
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-4">
         <div className="rounded-2xl border border-hairline bg-white p-6">
-          <p className="font-mono text-2xl font-semibold text-seal">₦{Number(profile.wallet_cleared).toLocaleString()}</p>
+          <p className="font-mono text-2xl font-semibold text-seal">{formatBalance(profile.wallet_cleared, balancesHidden)}</p>
           <p className="mt-1 text-xs text-muted">Cleared — earned and ready</p>
         </div>
         <div className="rounded-2xl border border-hairline bg-white p-6">
-          <p className="font-mono text-2xl font-semibold text-marigold-deep">₦{Number(profile.wallet_pending).toLocaleString()}</p>
+          <p className="font-mono text-2xl font-semibold text-marigold-deep">{formatBalance(profile.wallet_pending, balancesHidden)}</p>
           <p className="mt-1 text-xs text-muted">Pending — waiting on their first order</p>
         </div>
       </div>

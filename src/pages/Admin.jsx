@@ -1,9 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Activity, BookOpenText, ChevronDown, CircleDollarSign, ClipboardCheck, FileWarning, LayoutDashboard, Megaphone, Pause, Play, Scale, Search, ShieldCheck, Store, Users, Wallet, X } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient.js'
 import { LISTING_CATEGORIES } from '../lib/listingCategories.js'
 import { NIGERIAN_BANKS } from '../lib/nigerianBanks.js'
+import { escapeLikePattern, safeFileName } from '../lib/inputSafety.js'
+import { sanitizeHtml } from '../lib/sanitizeHtml.js'
+import { useBalanceVisibility } from '../lib/useBalanceVisibility.js'
+import { formatBalance } from '../lib/balanceDisplay.js'
+import BalanceToggle from '../components/BalanceToggle.jsx'
 
 export default function Admin() {
   const [session, setSession] = useState(null)
@@ -16,11 +21,20 @@ export default function Admin() {
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
 
+  // Supabase re-emits auth events (token refresh, SIGNED_IN) whenever the tab
+  // regains focus. Only a different user should reload the profile; otherwise
+  // the dashboard would unmount and lose its place.
+  const loadedUserIdRef = useRef(null)
+
   useEffect(() => {
     async function hydrateSession(nextSession) {
       setSession(nextSession)
 
-      if (!nextSession?.user?.id) {
+      const nextUserId = nextSession?.user?.id || null
+      if (nextUserId && nextUserId === loadedUserIdRef.current) return
+      loadedUserIdRef.current = nextUserId
+
+      if (!nextUserId) {
         setProfile(null)
         setProfileLoading(false)
         setChecking(false)
@@ -162,7 +176,7 @@ function RichTextEditor({ value, onChange, placeholder = 'Start writing…' }) {
   useEffect(() => {
     if (!editorRef.current) return
     if (editorRef.current.innerHTML !== value) {
-      editorRef.current.innerHTML = value || ''
+      editorRef.current.innerHTML = sanitizeHtml(value)
     }
   }, [value])
 
@@ -215,6 +229,7 @@ const ADMIN_SECTIONS = [
     { id: 'reports', label: 'Reports & moderation', icon: FileWarning, title: 'Reports & moderation', description: 'Review reports and manage marketplace safety.' },
     { id: 'disputes', label: 'Disputes', icon: Scale, title: 'Dispute resolution', description: 'Investigate and resolve buyer and seller cases.' },
     { id: 'listings', label: 'Listings', icon: Store, title: 'Listing moderation', description: 'Review listings and manage marketplace visibility.' },
+    { id: 'audit', label: 'Audit log', icon: ClipboardCheck, title: 'Audit log', description: 'Every change made by an admin, with who made it and when.' },
   ] },
   { group: 'Finance & people', items: [
     { id: 'payouts', label: 'Pending payouts', icon: Wallet, title: 'Pending payouts', description: 'Review payout requests and transfer status.' },
@@ -230,8 +245,15 @@ const ADMIN_SECTIONS = [
   ] },
 ]
 
+const ADMIN_SECTION_IDS = new Set(ADMIN_SECTIONS.flatMap((group) => group.items.map((item) => item.id)))
+
 function AdminHome({ onLogout, email }) {
-  const [tab, setTab] = useState('overview')
+  // The open section lives in the URL (?section=...), so a reload or a shared
+  // link reopens the same place instead of the overview.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedSection = searchParams.get('section')
+  const tab = ADMIN_SECTION_IDS.has(requestedSection) ? requestedSection : 'overview'
+  const setTab = (id) => setSearchParams(id === 'overview' ? {} : { section: id })
   const [mobileSectionsOpen, setMobileSectionsOpen] = useState(false)
   const currentSection = ADMIN_SECTIONS.flatMap((group) => group.items).find((item) => item.id === tab) || ADMIN_SECTIONS[0].items[0]
   const renderPanel = () => {
@@ -247,6 +269,7 @@ function AdminHome({ onLogout, email }) {
     if (tab === 'payouts') return <PendingPayouts />
     if (tab === 'earnings') return <TrustallEarnings />
     if (tab === 'blog') return <BlogDashboard />
+    if (tab === 'audit') return <AuditLog />
     return <ServiceCatalogManager />
   }
 
@@ -615,7 +638,7 @@ function ListingModeration() {
     if (status === 'active') query = query.eq('is_active', true)
     if (status === 'inactive') query = query.eq('is_active', false)
     if (status === 'pending_review') query = query.eq('status', 'pending_review')
-    if (search.trim()) query = query.ilike('title', `%${search.trim()}%`)
+    if (search.trim()) query = query.ilike('title', `%${escapeLikePattern(search.trim())}%`)
     const { data, error: queryError } = await query
     if (queryError) setError(queryError.message)
     setListings(data || []); setLoading(false)
@@ -665,30 +688,247 @@ function MediatorManagement() {
   return <section className="mx-auto max-w-3xl px-6 py-10"><p className="font-mono text-xs uppercase tracking-widest text-seal">Access</p><h1 className="mt-2 font-display text-2xl font-bold text-ink">Mediator eligibility</h1><p className="mt-2 text-sm text-muted">Designate trusted non-admin profiles to mediate disputes. The database policy remains the enforcement boundary.</p>{error && <p className="mt-4 text-sm text-marigold-deep">{error}</p>}<div className="mt-6 space-y-2">{profiles.map((profile) => <div key={profile.id} className="flex items-center justify-between rounded-xl border border-hairline bg-white p-4"><div><p className="font-semibold text-ink">{profile.business_name || profile.full_name || 'Unnamed profile'}</p><p className="text-xs text-muted">{profile.role} · {profile.is_dispute_judge ? 'Eligible mediator' : 'Not designated'}</p></div><button type="button" onClick={() => toggle(profile)} className="rounded-full border border-hairline px-3 py-1.5 font-mono text-xs">{profile.is_dispute_judge ? 'Remove eligibility' : 'Make mediator'}</button></div>)}</div></section>
 }
 
+const DIRECTORY_FILTERS = [['all', 'All'], ['sellers', 'Sellers'], ['buyers', 'Buyers'], ['suspended', 'Suspended']]
+
 function ProfileDirectory() {
   const [profiles, setProfiles] = useState([])
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
+  const [query, setQuery] = useState('')
+  const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [selectedId, setSelectedId] = useState(null)
+
+  // Wait for a pause in typing before searching.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setQuery(search.trim())
+      setPage(0)
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [search])
+
+  // The database searches every user (name, business, handle, email or ID), not just a loaded page.
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    setError('')
+    supabase.rpc('admin_search_users', {
+      p_query: query, p_filter: filter, p_limit: ADMIN_PAGE_SIZE, p_offset: page * ADMIN_PAGE_SIZE,
+    }).then(({ data, error: queryError }) => {
+      if (!active) return
+      if (queryError) setError(queryError.message)
+      setProfiles(data || [])
+      setLoading(false)
+    })
+    return () => { active = false }
+  }, [query, filter, page])
+
+  return (
+    <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-widest text-seal">People</p>
+          <h1 className="mt-2 font-display text-2xl font-bold text-ink">Users, sellers & buyers</h1>
+          <p className="mt-1 text-sm text-muted">Search everyone on Trustall. Select a person to see their full details.</p>
+        </div>
+        <label className="flex min-h-11 min-w-[240px] items-center gap-2 rounded-lg border border-hairline bg-white px-3">
+          <Search size={16} className="text-muted" />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name, handle, email or ID" aria-label="Search users" className="min-w-0 flex-1 border-0 bg-transparent text-sm outline-none" />
+        </label>
+      </div>
+      <div className="mt-5 flex flex-wrap gap-2">
+        {DIRECTORY_FILTERS.map(([id, label]) => (
+          <button key={id} type="button" onClick={() => { setFilter(id); setPage(0) }} aria-pressed={filter === id} className={`rounded-full px-4 py-2 text-xs font-semibold ${filter === id ? 'bg-seal text-white' : 'border border-hairline text-muted'}`}>{label}</button>
+        ))}
+      </div>
+      {error && <p className="mt-5 text-sm text-marigold-deep">{error}</p>}
+      {loading && <p className="mt-6 text-sm text-muted">Loading profiles…</p>}
+      {!loading && !error && profiles.length === 0 && <p className="mt-6 rounded-xl border border-hairline bg-white p-5 text-sm text-muted">No one matches this search.</p>}
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {profiles.map((profile) => (
+          <button key={profile.id} type="button" onClick={() => setSelectedId(profile.id)} className="rounded-xl border border-hairline bg-white p-4 text-left transition hover:border-seal focus-visible:border-seal focus-visible:outline-none">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate font-semibold text-ink">{profile.business_name || profile.full_name || 'Unnamed profile'}</p>
+                <p className="mt-1 truncate text-xs text-muted">{profile.email || (profile.handle ? `@${profile.handle}` : profile.id)}</p>
+              </div>
+              <span className="rounded-full bg-surfacealt px-2.5 py-1 font-mono text-[9px] uppercase text-muted">{profile.is_seller ? 'Seller' : 'Buyer'}</span>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-hairline pt-3 text-xs">
+              <span className={profile.verified_seller ? 'font-semibold text-seal' : 'text-muted'}>{profile.verified_seller ? 'Verified seller' : profile.role || 'Member'}</span>
+              <span className={profile.status === 'suspended' ? 'font-semibold text-marigold-deep' : 'text-muted'}>{profile.status || 'active'}</span>
+              <span className="w-full text-[10px] text-muted">Joined {profile.created_at ? new Date(profile.created_at).toLocaleDateString() : 'date unavailable'}</span>
+            </div>
+          </button>
+        ))}
+      </div>
+      <div className="mt-4 flex justify-between">
+        <button type="button" disabled={page === 0 || loading} onClick={() => setPage((value) => value - 1)} className="rounded-full border border-hairline px-4 py-2 font-mono text-xs disabled:opacity-40">Previous</button>
+        <button type="button" disabled={profiles.length < ADMIN_PAGE_SIZE || loading} onClick={() => setPage((value) => value + 1)} className="rounded-full border border-hairline px-4 py-2 font-mono text-xs disabled:opacity-40">Next</button>
+      </div>
+      <UserDetailsPanel userId={selectedId} onClose={() => setSelectedId(null)} />
+    </section>
+  )
+}
+
+function formatDateTime(value) {
+  return value ? new Date(value).toLocaleString() : '—'
+}
+
+function DetailRow({ label, children }) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-1.5 text-sm">
+      <dt className="text-muted">{label}</dt>
+      <dd className="min-w-0 break-words text-right font-medium text-ink">{children}</dd>
+    </div>
+  )
+}
+
+function DetailSection({ title, children }) {
+  return (
+    <section className="mt-5 rounded-xl border border-hairline p-4">
+      <h3 className="font-mono text-[10px] uppercase tracking-widest text-seal">{title}</h3>
+      <div className="mt-2">{children}</div>
+    </section>
+  )
+}
+
+// Full picture of one user for admins: account, contact, money, activity,
+// verification history and warnings. Private fields come from an admin-only RPC.
+function UserDetailsPanel({ userId, onClose }) {
+  const [details, setDetails] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const { hidden: balancesHidden, toggle: toggleBalances } = useBalanceVisibility()
 
   useEffect(() => {
-    supabase.from('profiles').select('id, full_name, business_name, handle, is_seller, verified_seller, status, role, created_at').order('created_at', { ascending: false }).range(0, 499)
-      .then(({ data, error: queryError }) => {
-        if (queryError) setError(queryError.message)
-        else setProfiles(data || [])
-        setLoading(false)
-      })
-  }, [])
+    if (!userId) return undefined
+    let active = true
+    setDetails(null)
+    setError('')
+    setLoading(true)
+    supabase.rpc('admin_get_user_details', { p_user_id: userId }).then(({ data, error: queryError }) => {
+      if (!active) return
+      if (queryError) setError(queryError.message)
+      else if (!data) setError('This user no longer exists.')
+      setDetails(data || null)
+      setLoading(false)
+    })
+    return () => { active = false }
+  }, [userId])
 
-  const visibleProfiles = profiles.filter((profile) => {
-    if (filter === 'sellers' && !profile.is_seller) return false
-    if (filter === 'buyers' && profile.is_seller) return false
-    const name = `${profile.business_name || ''} ${profile.full_name || ''} ${profile.handle || ''}`.toLowerCase()
-    return !search.trim() || name.includes(search.trim().toLowerCase())
-  })
+  useEffect(() => {
+    if (!userId) return undefined
+    const closeOnEscape = (event) => { if (event.key === 'Escape') onClose() }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [userId, onClose])
 
-  return <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6"><div className="flex flex-wrap items-end justify-between gap-4"><div><p className="font-mono text-[10px] uppercase tracking-widest text-seal">People</p><h1 className="mt-2 font-display text-2xl font-bold text-ink">Users, sellers & buyers</h1><p className="mt-1 text-sm text-muted">Profiles loaded from the live directory.</p></div><label className="flex min-h-11 min-w-[240px] items-center gap-2 rounded-lg border border-hairline bg-white px-3"><Search size={16} className="text-muted" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name or handle" className="min-w-0 flex-1 border-0 bg-transparent text-sm outline-none" /></label></div><div className="mt-5 flex flex-wrap gap-2">{[['all', 'All'], ['sellers', 'Sellers'], ['buyers', 'Buyers']].map(([id, label]) => <button key={id} type="button" onClick={() => setFilter(id)} className={`rounded-full px-4 py-2 text-xs font-semibold ${filter === id ? 'bg-seal text-white' : 'border border-hairline text-muted'}`}>{label}</button>)}</div>{error && <p className="mt-5 text-sm text-marigold-deep">{error}</p>}{loading && <p className="mt-6 text-sm text-muted">Loading profiles…</p>}{!loading && !error && visibleProfiles.length === 0 && <p className="mt-6 rounded-xl border border-hairline bg-white p-5 text-sm text-muted">No profiles match this filter.</p>}<div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{visibleProfiles.map((profile) => <article key={profile.id} className="rounded-xl border border-hairline bg-white p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-semibold text-ink">{profile.business_name || profile.full_name || 'Unnamed profile'}</p><p className="mt-1 truncate text-xs text-muted">{profile.handle ? `@${profile.handle}` : profile.id}</p></div><span className="rounded-full bg-surfacealt px-2.5 py-1 font-mono text-[9px] uppercase text-muted">{profile.is_seller ? 'Seller' : 'Buyer'}</span></div><div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-hairline pt-3 text-xs"><span className={profile.verified_seller ? 'font-semibold text-seal' : 'text-muted'}>{profile.verified_seller ? 'Verified seller' : profile.role || 'Member'}</span><span className="text-muted">{profile.status || 'active'}</span><span className="w-full text-[10px] text-muted">Joined {profile.created_at ? new Date(profile.created_at).toLocaleDateString() : 'date unavailable'}</span></div></article>)}</div></section>
+  if (!userId) return null
+
+  const profile = details?.profile || {}
+  const account = details?.account || {}
+  const name = profile.business_name || profile.full_name || 'Unnamed profile'
+  const publicPath = profile.is_seller ? `/seller/${profile.handle || profile.id}` : `/buyer/${profile.handle || profile.id}`
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+      <aside role="dialog" aria-modal="true" aria-labelledby="user-details-title" onClick={(event) => event.stopPropagation()} className="h-full w-full max-w-lg overflow-y-auto bg-white p-5 shadow-2xl sm:p-6">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="font-mono text-[10px] uppercase tracking-widest text-seal">User details</p>
+            <h2 id="user-details-title" className="mt-1 truncate font-display text-xl font-bold text-ink">{loading ? 'Loading…' : name}</h2>
+            {profile.handle && <p className="text-xs text-muted">@{profile.handle}</p>}
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close user details" className="rounded-full border border-hairline p-2 text-muted hover:text-ink"><X size={16} /></button>
+        </div>
+
+        {error && <p className="mt-5 text-sm text-marigold-deep">{error}</p>}
+
+        {details && (
+          <>
+            <DetailSection title="Account">
+              <dl>
+                <DetailRow label="Email">{account.email || '—'}</DetailRow>
+                <DetailRow label="Email confirmed">{account.email_confirmed_at ? 'Yes' : 'No'}</DetailRow>
+                <DetailRow label="Phone">{details.phone || '—'}</DetailRow>
+                <DetailRow label="Signed up">{formatDateTime(account.signed_up_at || profile.created_at)}</DetailRow>
+                <DetailRow label="Last sign-in">{formatDateTime(account.last_sign_in_at)}</DetailRow>
+                <DetailRow label="Last seen">{formatDateTime(profile.last_seen_at)}</DetailRow>
+                <DetailRow label="User ID"><span className="font-mono text-xs">{profile.id}</span></DetailRow>
+              </dl>
+            </DetailSection>
+
+            <DetailSection title="Standing">
+              <dl>
+                <DetailRow label="Role">{profile.role || 'user'}</DetailRow>
+                <DetailRow label="Status">{profile.status || 'active'}</DetailRow>
+                <DetailRow label="Seller">{profile.is_seller ? `Yes · level ${profile.seller_level ?? 0}` : 'No'}</DetailRow>
+                <DetailRow label="Verified seller">{profile.verified_seller ? 'Yes' : 'No'}</DetailRow>
+                <DetailRow label="Pro vendor">{profile.pro_vendor ? 'Yes' : 'No'}</DetailRow>
+                <DetailRow label="Warnings">{profile.warning_count ?? 0} of 3</DetailRow>
+                <DetailRow label="Reports against them">{details.reports_against} ({details.open_reports_against} open)</DetailRow>
+              </dl>
+            </DetailSection>
+
+            <DetailSection title="Money">
+              <div className="flex justify-end">
+                <BalanceToggle hidden={balancesHidden} onToggle={toggleBalances} className="border border-hairline text-muted hover:text-ink" />
+              </div>
+              <dl>
+                <DetailRow label="Wallet available">{formatBalance(profile.wallet_cleared, balancesHidden)}</DetailRow>
+                <DetailRow label="Wallet pending">{formatBalance(profile.wallet_pending, balancesHidden)}</DetailRow>
+                <DetailRow label="Confirmed seller payouts">{formatBalance(details.orders?.seller_payouts_confirmed, balancesHidden)}</DetailRow>
+                <DetailRow label="Payout account connected">{profile.payout_connected ? 'Yes' : 'No'}</DetailRow>
+              </dl>
+            </DetailSection>
+
+            <DetailSection title="Activity">
+              <dl>
+                <DetailRow label="Listings">{details.listings?.total ?? 0} ({details.listings?.live ?? 0} live)</DetailRow>
+                <DetailRow label="Orders as buyer">{details.orders?.as_buyer ?? 0}</DetailRow>
+                <DetailRow label="Orders as seller">{details.orders?.as_seller ?? 0}</DetailRow>
+                <DetailRow label="Completed sales">{profile.completed_sales_count ?? 0}</DetailRow>
+                <DetailRow label="Completed purchases">{profile.completed_purchases_count ?? 0}</DetailRow>
+              </dl>
+            </DetailSection>
+
+            <DetailSection title="Verification history">
+              {details.verification.length === 0 && <p className="text-sm text-muted">No verification requests.</p>}
+              <ul className="space-y-2">
+                {details.verification.map((request) => (
+                  <li key={request.id} className="rounded-lg bg-surfacealt p-3 text-sm">
+                    <p className="font-semibold capitalize text-ink">{request.status} · {request.id_type} ••••{request.id_number_last4 || '????'}</p>
+                    <p className="mt-1 text-xs text-muted">Submitted {formatDateTime(request.submitted_at)}{request.reviewed_at ? ` · reviewed ${formatDateTime(request.reviewed_at)}` : ''}</p>
+                    {request.rejection_reason && <p className="mt-1 text-xs text-marigold-deep">Reason: {request.rejection_reason}</p>}
+                    {request.document_deleted && <p className="mt-1 text-xs text-muted">Document deleted after rejection.</p>}
+                  </li>
+                ))}
+              </ul>
+            </DetailSection>
+
+            <DetailSection title="Warnings">
+              {details.warnings.length === 0 && <p className="text-sm text-muted">No warnings.</p>}
+              <ul className="space-y-2">
+                {details.warnings.map((warning, index) => (
+                  <li key={`${warning.issued_at}-${index}`} className="rounded-lg bg-surfacealt p-3 text-sm">
+                    <p className="text-ink">{warning.reason}</p>
+                    <p className="mt-1 text-xs text-muted">{formatDateTime(warning.issued_at)}</p>
+                  </li>
+                ))}
+              </ul>
+            </DetailSection>
+
+            <Link to={publicPath} target="_blank" rel="noreferrer" className="mt-5 inline-block rounded-full border border-ink px-4 py-2 font-mono text-xs text-ink hover:border-seal hover:text-seal">
+              View public profile
+            </Link>
+          </>
+        )}
+      </aside>
+    </div>
+  )
 }
 
 function AdminPromotions() {
@@ -705,11 +945,17 @@ function AdminPromotions() {
   async function loadPromotions() {
     setLoading(true)
     setError('')
-    const [promotionResult, revenueResult, profileResult, listingResult] = await Promise.all([
+    const [promotionResult, revenueResult] = await Promise.all([
       supabase.from('promotions').select('*').order('created_at', { ascending: false }),
       supabase.from('promotions').select('amount').eq('payment_status', 'successful'),
-      supabase.from('profiles').select('id, full_name, business_name'),
-      supabase.from('listings').select('id, title'),
+    ])
+    // Only look up the sellers and listings these promotions point at.
+    const rows = promotionResult.data || []
+    const sellerIds = [...new Set(rows.map((row) => row.seller_id).filter(Boolean))]
+    const listingIds = [...new Set(rows.filter((row) => row.target_type !== 'storefront').map((row) => row.target_id).filter(Boolean))]
+    const [profileResult, listingResult] = await Promise.all([
+      sellerIds.length ? supabase.from('profiles').select('id, full_name, business_name').in('id', sellerIds) : { data: [] },
+      listingIds.length ? supabase.from('listings').select('id, title').in('id', listingIds) : { data: [] },
     ])
     const queryError = promotionResult.error || revenueResult.error || profileResult.error || listingResult.error
     if (queryError) setError(queryError.message || 'Promotion data could not be loaded.')
@@ -814,7 +1060,7 @@ function AdminOverview({ onNavigate }) {
     const { data: overview, error: overviewError } = await supabase.rpc('get_admin_dashboard', { p_since: since, p_limit: ADMIN_PAGE_SIZE })
     if (overviewError) {
       setError(overviewError.code === 'PGRST202'
-        ? 'Admin analytics is not deployed yet. Apply supabase/migrations/0020_admin_dashboard_audit.sql in Supabase SQL Editor, then reload this page.'
+        ? 'Admin analytics is not deployed yet. Apply supabase/migrations/0021_admin_dashboard_audit.sql in Supabase SQL Editor, then reload this page.'
         : overviewError.message || 'Dashboard data could not be loaded.')
       setLoading(false)
       return
@@ -1028,7 +1274,7 @@ function BlogDashboard() {
     setUploadingCover(true)
     setError('')
 
-    const path = `blog-images/${Date.now()}-${file.name}`
+    const path = `blog-images/${Date.now()}-${safeFileName(file.name)}`
     const { data: uploadData, error: uploadError } = await supabase.storage.from('blog-images').upload(path, file, { upsert: true })
     if (uploadError) {
       setError('Cover image upload failed. Please try again.')
@@ -1216,40 +1462,80 @@ function BlogDashboard() {
   )
 }
 
+function AuditLog() {
+  const [entries, setEntries] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    supabase.from('admin_audit_log').select('id, action, table_name, record_id, changes, created_at, actor:actor_id(full_name, business_name)')
+      .order('created_at', { ascending: false }).limit(200)
+      .then(({ data, error: queryError }) => {
+        if (queryError) setError(queryError.message)
+        setEntries(data || [])
+        setLoading(false)
+      })
+  }, [])
+
+  return (
+    <section className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+      <p className="font-mono text-[10px] uppercase tracking-widest text-seal">Accountability</p>
+      <h1 className="mt-2 font-display text-2xl font-bold text-ink">Audit log</h1>
+      <p className="mt-1 text-sm text-muted">The latest 200 changes made by admins. Entries are written by the database and can't be edited.</p>
+      {error && <p className="mt-4 text-sm text-marigold-deep">{error}</p>}
+      {loading && <p className="mt-6 text-sm text-muted">Loading audit log…</p>}
+      {!loading && !error && entries.length === 0 && <p className="mt-6 rounded-xl border border-hairline bg-white p-5 text-sm text-muted">No admin changes recorded yet.</p>}
+      <div className="mt-5 space-y-2">
+        {entries.map((entry) => (
+          <article key={entry.id} className="rounded-xl border border-hairline bg-white p-4 text-sm">
+            <p className="font-semibold text-ink">
+              {entry.actor?.business_name || entry.actor?.full_name || 'Unknown admin'} · {entry.action} · {entry.table_name}
+            </p>
+            <p className="mt-1 font-mono text-[11px] text-muted">{new Date(entry.created_at).toLocaleString()} · record {entry.record_id || '—'}</p>
+            <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-surfacealt p-2 font-mono text-[11px] text-ink">{JSON.stringify(entry.changes, null, 2)}</pre>
+          </article>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+const VERIFICATION_VIEWS = [['pending', 'Pending'], ['approved', 'Approved'], ['rejected', 'Rejected']]
+
 function VerificationQueue() {
+  const [view, setView] = useState('pending')
   const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(true)
   const [docUrls, setDocUrls] = useState({})
+  const [revealedIds, setRevealedIds] = useState({})
   const [busyId, setBusyId] = useState(null)
 
   useEffect(() => {
     loadRequests()
 
-    const interval = window.setInterval(() => {
-      loadRequests()
-    }, 3500)
-
+    // Realtime alone keeps the queue current; polling and profile updates
+    // (which fire on every presence ping) caused constant reloads.
     const channel = supabase
-      .channel('admin-verification-queue')
+      .channel(`admin-verification-${view}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'verification_requests' }, loadRequests)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'verification_requests' }, loadRequests)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, loadRequests)
       .subscribe()
 
     return () => {
-      window.clearInterval(interval)
       supabase.removeChannel(channel)
     }
-  }, [])
+  }, [view])
 
   async function loadRequests() {
     setLoading(true)
 
+    // Pending: oldest first, so the queue is worked in order. History: newest first.
     const { data, error } = await supabase
       .from('verification_requests')
-      .select('*, seller_profile:seller_id(full_name, business_name, phone, verified_seller, status, seller_level)')
-      .eq('status', 'pending')
-      .order('created_at', { ascending: true })
+      .select('*, seller_profile:seller_id(full_name, business_name, verified_seller, status, seller_level, profile_contacts(phone))')
+      .eq('status', view)
+      .order(view === 'pending' ? 'created_at' : 'reviewed_at', { ascending: view === 'pending' })
+      .limit(100)
 
     if (error) {
       console.error('Admin verification fetch failed:', error)
@@ -1258,34 +1544,57 @@ function VerificationQueue() {
       return
     }
 
-    const queue = (data || []).filter((row) => row.status === 'pending')
-
-    setRequests(queue)
+    const rows = data || []
+    setRequests(rows)
     setLoading(false)
 
-    const urls = {}
-    for (const r of queue) {
-      if (!r.document_url) continue
-      const { data: signed } = await supabase.storage
-        .from('verification-docs')
-        .createSignedUrl(r.document_url, 60 * 10)
-      if (signed) urls[r.id] = signed.signedUrl
+    // Rejected documents are deleted, so only sign links for files that still exist.
+    const withDocuments = rows.filter((r) => r.document_url && !r.document_deleted_at)
+    if (withDocuments.length === 0) {
+      setDocUrls({})
+      return
     }
-    setDocUrls(urls)
+    const { data: signed } = await supabase.storage
+      .from('verification-docs')
+      .createSignedUrls(withDocuments.map((r) => r.document_url), 60 * 10)
+    const urlByPath = new Map((signed || []).filter((item) => item.signedUrl).map((item) => [item.path, item.signedUrl]))
+    setDocUrls(Object.fromEntries(withDocuments.map((r) => [r.id, urlByPath.get(r.document_url)]).filter(([, url]) => url)))
+  }
+
+  // ID numbers are encrypted at rest; only admins can decrypt them, one request at a time.
+  async function revealIdNumber(request) {
+    const { data, error } = await supabase.rpc('reveal_verification_id_number', { p_request_id: request.id })
+    if (error) {
+      alert(error.message || 'Unable to reveal this ID number.')
+      return
+    }
+    setRevealedIds((prev) => ({ ...prev, [request.id]: data || 'not provided' }))
   }
 
   async function decide(request, approve) {
+    const reason = approve ? null : window.prompt('Why is this request rejected? The seller will see this.')
+    if (!approve && !reason?.trim()) return
     setBusyId(request.id)
-    const { data: { user } } = await supabase.auth.getUser()
 
-    await supabase.from('verification_requests').update({
-      status: approve ? 'approved' : 'rejected',
-      reviewed_by: user.id,
-      reviewed_at: new Date().toISOString(),
-    }).eq('id', request.id)
+    // One database call updates the request and the seller's badge together.
+    const { data, error } = await supabase.rpc('admin_review_verification', {
+      p_request_id: request.id, p_approve: approve, p_reason: reason,
+    })
+    if (error || !data?.success) {
+      setBusyId(null)
+      alert(error?.message || data?.error || 'This request could not be reviewed.')
+      return
+    }
 
-    if (approve) {
-      await supabase.from('profiles').update({ verified_seller: true, seller_level: 1 }).eq('id', request.seller_id)
+    // Rejected ID documents aren't kept: delete the file, then record that it's gone.
+    if (!approve && data.document_path) {
+      const { error: removeError } = await supabase.storage.from('verification-docs').remove([data.document_path])
+      if (removeError) {
+        alert(`Rejected, but the document could not be deleted: ${removeError.message}`)
+      } else {
+        const { error: markError } = await supabase.from('verification_requests').update({ document_deleted_at: new Date().toISOString() }).eq('id', request.id)
+        if (markError) console.error('Document deleted, but its deletion time was not recorded:', markError)
+      }
     }
 
     setRequests((prev) => prev.filter((r) => r.id !== request.id))
@@ -1296,26 +1605,44 @@ function VerificationQueue() {
     <section className="mx-auto max-w-4xl px-6 py-10">
       <h1 className="font-display text-2xl font-bold text-ink">Seller verification</h1>
 
-      {loading && <p className="mt-10 text-muted">Loading pending requests…</p>}
+      <div className="mt-5 flex flex-wrap gap-2">
+        {VERIFICATION_VIEWS.map(([id, label]) => (
+          <button key={id} type="button" onClick={() => setView(id)} aria-pressed={view === id} className={`rounded-full px-4 py-2 text-xs font-semibold ${view === id ? 'bg-seal text-white' : 'border border-hairline text-muted'}`}>{label}</button>
+        ))}
+      </div>
+
+      {loading && <p className="mt-10 text-muted">Loading {view} requests…</p>}
 
       {!loading && requests.length === 0 && (
         <p className="mt-10 rounded-xl border border-hairline bg-white p-6 text-muted">
-          No pending verification requests right now.
+          No {view} verification requests{view === 'pending' ? ' right now' : ''}.
         </p>
       )}
 
-      <div className="mt-10 space-y-5">
-        {requests.map((r) => (
+      <div className="mt-8 space-y-5">
+        {requests.map((r) => {
+          const contact = r.seller_profile?.profile_contacts
+          const phone = (Array.isArray(contact) ? contact[0] : contact)?.phone
+          return (
           <div key={r.id} className="rounded-2xl border border-hairline bg-white p-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <p className="font-display text-lg text-ink">{r.legal_name}</p>
                 <p className="mt-1 font-mono text-xs text-muted">
-                  {r.id_type} · {r.id_number} · {r.seller_profile?.phone || 'no phone on file'}
+                  {r.id_type} · {revealedIds[r.id] || (r.id_number_last4 ? `••••${r.id_number_last4}` : 'no ID number')}
+                  {!revealedIds[r.id] && r.id_number_last4 && (
+                    <button type="button" onClick={() => revealIdNumber(r)} className="ml-2 underline hover:text-seal">
+                      Reveal
+                    </button>
+                  )}
+                  {' · '}{phone || 'no phone on file'}
                 </p>
                 <p className="mt-1 text-xs text-muted">
                   Submitted {new Date(r.created_at).toLocaleDateString()}
+                  {r.reviewed_at && ` · ${r.status} ${new Date(r.reviewed_at).toLocaleDateString()}`}
                 </p>
+                {r.rejection_reason && <p className="mt-1 text-xs text-marigold-deep">Reason: {r.rejection_reason}</p>}
+                {r.document_deleted_at && <p className="mt-1 text-xs text-muted">Document deleted after rejection.</p>}
               </div>
               {docUrls[r.id] && (
                 <a
@@ -1329,7 +1656,7 @@ function VerificationQueue() {
               )}
             </div>
 
-            <div className="mt-5 flex gap-3">
+            {r.status === 'pending' && <div className="mt-5 flex gap-3">
               <button
                 disabled={busyId === r.id}
                 onClick={() => decide(r, true)}
@@ -1344,9 +1671,10 @@ function VerificationQueue() {
               >
                 Reject
               </button>
-            </div>
+            </div>}
           </div>
-        ))}
+          )
+        })}
       </div>
     </section>
   )
@@ -1638,27 +1966,27 @@ function ReportsQueue() {
     setLoading(true)
     const { data } = await supabase
       .from('reports')
-      .select('*, reporter:reporter_id(business_name, full_name), reported:reported_id(id, business_name, full_name, warning_count, status)')
+      .select('*, reporter:reporter_id(business_name, full_name), reported:reported_id(id, business_name, full_name, status)')
       .in('status', ['open', 'reviewing'])
       .order('created_at', { ascending: true })
-    setReports(data || [])
+
+    // warning_count is private; admins read it through admin_get_profiles.
+    const reportedIds = [...new Set((data || []).map((report) => report.reported?.id).filter(Boolean))]
+    const { data: privateRows } = reportedIds.length
+      ? await supabase.rpc('admin_get_profiles', { p_ids: reportedIds })
+      : { data: [] }
+    const warningsById = new Map((privateRows || []).map((row) => [row.id, row.warning_count]))
+    setReports((data || []).map((report) => report.reported
+      ? { ...report, reported: { ...report.reported, warning_count: warningsById.get(report.reported.id) ?? 0 } }
+      : report))
     setLoading(false)
   }
 
   async function issueWarning(report) {
     setBusyId(report.id)
-    const newCount = (report.reported.warning_count || 0) + 1
-    const shouldSuspend = newCount >= 3
-
-    await supabase.from('account_warnings').insert({
-      profile_id: report.reported.id,
-      reason: `${report.reason}${report.details ? ' — ' + report.details : ''}`,
-    })
-    await supabase.from('profiles').update({
-      warning_count: newCount,
-      status: shouldSuspend ? 'suspended' : 'warned',
-    }).eq('id', report.reported.id)
-    await supabase.from('reports').update({ status: 'resolved' }).eq('id', report.id)
+    // Records the warning, updates the count/suspension and closes the report in one step.
+    const { data, error } = await supabase.rpc('admin_issue_warning', { p_report_id: report.id })
+    if (error || !data?.success) alert(error?.message || data?.error || 'The warning could not be issued.')
 
     setBusyId(null)
     loadReports()
@@ -1666,14 +1994,16 @@ function ReportsQueue() {
 
   async function dismiss(report) {
     setBusyId(report.id)
-    await supabase.from('reports').update({ status: 'dismissed' }).eq('id', report.id)
+    const { error } = await supabase.from('reports').update({ status: 'dismissed' }).eq('id', report.id)
+    if (error) alert(`The report could not be dismissed: ${error.message}`)
     setBusyId(null)
     loadReports()
   }
 
   async function reactivate(report) {
     setBusyId(report.id)
-    await supabase.from('profiles').update({ status: 'active' }).eq('id', report.reported.id)
+    const { error } = await supabase.from('profiles').update({ status: 'active' }).eq('id', report.reported.id)
+    if (error) alert(`The account could not be reactivated: ${error.message}`)
     setBusyId(null)
     loadReports()
   }

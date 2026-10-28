@@ -56,31 +56,29 @@ export async function sendBrowserNotification(title, body, tag = 'trustall') {
   }
 }
 
-export async function sendNotificationEmail({ to, subject, html }) {
-  if (!to) return
+// Emails the signed-in user only. The function looks up their address and
+// builds the HTML itself from this plain text.
+export async function sendNotificationEmail({ subject, body }) {
   try {
     const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.access_token) return
     const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-notification-email`
     await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${session?.access_token || ''}`,
+        Authorization: `Bearer ${session.access_token}`,
       },
-      body: JSON.stringify({ to, subject, html }),
+      body: JSON.stringify({ subject, body }),
     })
   } catch (error) {
     console.warn('Notification email could not be sent:', error)
   }
 }
 
-export async function notifyConversationEvent({ recipientEmail, title, body, preview }) {
+export async function notifyConversationEvent({ emailSelf = false, title, body, preview }) {
   sendBrowserNotification(title, preview || body, 'conversation')
-  if (recipientEmail) {
-    await sendNotificationEmail({
-      to: recipientEmail,
-      subject: title,
-      html: `<p>${body}</p><p>Open your Trustall inbox to view it.</p>`,
-    })
+  if (emailSelf) {
+    await sendNotificationEmail({ subject: title, body })
   }
 }

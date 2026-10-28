@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+import { isUuid, secretsMatch } from "../_shared/validate.ts"
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -57,14 +58,16 @@ Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
 
   try {
+    // Only the database webhook may trigger pushes. Without the secret configured
+    // the function refuses everything rather than accepting anyone.
     const expectedSecret = Deno.env.get("PUSH_WEBHOOK_SECRET")
-    if (expectedSecret && request.headers.get("x-push-secret") !== expectedSecret) {
+    if (!expectedSecret || !secretsMatch(request.headers.get("x-push-secret"), expectedSecret)) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } })
     }
 
     const payload = await request.json()
     const notification_id = payload.notification_id || payload.record?.id
-    if (!notification_id) throw new Error("notification_id is required")
+    if (!isUuid(notification_id)) throw new Error("notification_id must be a UUID")
 
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
     const supabaseUrl = Deno.env.get("SUPABASE_URL")
@@ -120,6 +123,6 @@ Deno.serve(async (request) => {
     return new Response(JSON.stringify({ sent, removed: failedTokenIds.length }), { headers: { ...corsHeaders, "Content-Type": "application/json" } })
   } catch (error) {
     console.error("Push notification failed:", error)
-    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Push notification failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } })
+    return new Response(JSON.stringify({ error: "Push notification failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } })
   }
 })

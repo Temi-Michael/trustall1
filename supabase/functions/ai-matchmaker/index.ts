@@ -1,4 +1,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
+import { clientIp, TOO_MANY_REQUESTS, withinRateLimit } from "../_shared/rateLimit.ts";
+
+// Shown to users instead of provider or configuration errors, which stay in the logs.
+const UNAVAILABLE = 'The assistant is unavailable right now. Please try again later.'
 
 Deno.serve(async (req) => {
   const corsHeaders = {
@@ -12,8 +17,18 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Open to signed-out visitors, so limit by address: 20 questions per 10 minutes.
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+    if (!(await withinRateLimit(admin, `ai:${clientIp(req)}`, 20, 600))) {
+      return new Response(JSON.stringify({ error: TOO_MANY_REQUESTS }), {
+        status: 429,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
     const body = await req.json().catch(() => ({}))
-    const query = typeof body.query === 'string' ? body.query.trim() : ''
+    // Cap the prompt so a single request can't run up the AI bill.
+    const query = typeof body?.query === 'string' ? body.query.trim().slice(0, 500) : ''
     const geminiApiKey = Deno.env.get('GEMINI_API_KEY') || Deno.env.get('GOOGLE_API_KEY')
     const openAiApiKey = Deno.env.get('OPENAI_API_KEY')
 
@@ -51,7 +66,7 @@ Deno.serve(async (req) => {
 
       if (!geminiResponse.ok) {
         console.error('Gemini request failed:', geminiData)
-        return new Response(JSON.stringify({ error: geminiData?.error?.message || 'Gemini request failed.' }), {
+        return new Response(JSON.stringify({ error: UNAVAILABLE }), {
           status: 500,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
@@ -71,7 +86,8 @@ Deno.serve(async (req) => {
     }
 
     if (!openAiApiKey) {
-      return new Response(JSON.stringify({ error: 'No AI API key configured. Add GEMINI_API_KEY or OPENAI_API_KEY in your Supabase project secrets.' }), {
+      console.error('ai-matchmaker: no AI API key configured. Add GEMINI_API_KEY or OPENAI_API_KEY in the project secrets.')
+      return new Response(JSON.stringify({ error: UNAVAILABLE }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
@@ -107,7 +123,7 @@ Deno.serve(async (req) => {
 
     if (!openAiResponse.ok) {
       console.error('OpenAI request failed:', openAiData)
-      return new Response(JSON.stringify({ error: openAiData.error?.message || 'OpenAI request failed.' }), {
+      return new Response(JSON.stringify({ error: UNAVAILABLE }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
@@ -122,7 +138,7 @@ Deno.serve(async (req) => {
     })
   } catch (err: any) {
     console.error('ai-matchmaker error', err)
-    return new Response(JSON.stringify({ error: err?.message || String(err) }), {
+    return new Response(JSON.stringify({ error: UNAVAILABLE }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })

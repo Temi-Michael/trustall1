@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { getNotificationDisplayTitle, getNotificationBadgeSummary } from './notificationUtils.js'
+import { getNotificationDisplayTitle, getNotificationBadgeSummary } from './notificationFormat.js'
 
 test('message notifications show sender name instead of a generic Trustall label', () => {
   const notification = {
