@@ -5,3 +5,8 @@ dist
 !.env.example
 .DS_Store
 dist.zip
+
+# Personal working notes, kept out of the repository
+issues.md
+fix.md
+update.md

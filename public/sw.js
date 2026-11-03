@@ -1,8 +1,10 @@
-const CACHE_NAME = 'trustall-v6';
+// v7: new caching rules; the version bump clears caches saved by older rules.
+const CACHE_NAME = 'trustall-v7';
 const ASSETS = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg', '/icon-192.svg', '/icon-512.svg', '/favicon.ico', '/robots.txt'];
 
-importScripts('https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/10.7.0/firebase-messaging-compat.js');
+// Keep in step with the firebase version in package.json.
+importScripts('https://www.gstatic.com/firebasejs/12.17.1/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/12.17.1/firebase-messaging-compat.js');
 
 firebase.initializeApp({
   apiKey: 'AIzaSyDX-XgxZm4RwVNNdZMYwZK-wN5jPgA7u2k',
@@ -52,14 +54,22 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  if (event.request.method !== 'GET') return;
+  const { request } = event;
+  if (request.method !== 'GET') return;
 
-  if (event.request.mode === 'navigate') {
+  // Other sites (Supabase, Paystack, Firebase, fonts) keep their own caching rules.
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+
+  if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request)
+      fetch(request)
         .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', copy));
+          // Only a real page becomes the offline copy, never an error page.
+          if (response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', copy));
+          }
           return response;
         })
         .catch(() => caches.match('/index.html'))
@@ -67,25 +77,22 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  const isStaticAssetRequest = event.request.url.startsWith(self.location.origin + '/assets/') || event.request.url.includes('.js') || event.request.url.includes('.css');
+  // Vite fingerprints build files (/assets/name-hash.js), so a cached copy is never stale.
+  if (url.pathname.startsWith('/assets/')) {
+    event.respondWith(
+      caches.match(request).then((cached) => cached || fetch(request).then((response) => {
+        if (response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+        }
+        return response;
+      }))
+    );
+    return;
+  }
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request)
-        .then((response) => {
-          if (response && response.ok && isStaticAssetRequest) {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-          }
-          return response;
-        })
-        .catch(() => {
-          if (event.request.mode === 'navigate') return caches.match('/index.html');
-          return Response.error();
-        });
-    })
-  );
+  // Everything else on this site: fresh from the network, cached copy only when offline.
+  event.respondWith(fetch(request).catch(() => caches.match(request).then((cached) => cached || Response.error())));
 });
 
 self.addEventListener('notificationclick', (event) => {

@@ -3,7 +3,7 @@ import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-do
 import { Eye, EyeOff } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient.js'
 import { useProfile } from '../lib/useProfile.js'
-import { buildAuthCallbackUrl, clearAuthIntent, getAuthIntent, getEmailSignupOutcome, saveAuthIntent, shouldCompleteGoogleSignup } from '../lib/authFlow.js'
+import { buildAuthCallbackUrl, clearAuthIntent, getAuthIntent, getEmailSignupOutcome, safeRedirectPath, saveAuthIntent, shouldCompleteGoogleSignup } from '../lib/authFlow.js'
 import { safeFileName } from '../lib/inputSafety.js'
 
 async function uploadAvatar(file, userId) {
@@ -37,7 +37,7 @@ export default function Auth() {
   const [searchParams] = useSearchParams()
   const { session, profile, loading } = useProfile()
   const intent = getAuthIntent(searchParams, typeof window !== 'undefined' ? window.sessionStorage : null)
-  const redirectTo = location.state?.redirectTo || intent.redirectTo
+  const redirectTo = safeRedirectPath(location.state?.redirectTo || intent.redirectTo)
   const refCode = searchParams.get('ref')
   const isGoogleSignupCompletion = shouldCompleteGoogleSignup(intent.flow, session)
 

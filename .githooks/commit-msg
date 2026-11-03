@@ -1,0 +1,10 @@
+#!/bin/sh
+# Removes AI attribution trailers (e.g. "Co-authored-by: Copilot", "Generated
+# with Claude Code") from commit messages; this repo doesn't record them.
+# Enabled by `npm install`, which sets core.hooksPath to .githooks.
+message_file="$1"
+pattern='^(co-authored-by:.*(copilot|claude|anthropic|openai|chatgpt|cursor|gemini|codeium)|.*generated with \[?(claude|copilot|chatgpt|cursor))'
+
+if grep -qiE "$pattern" "$message_file"; then
+  grep -viE "$pattern" "$message_file" > "$message_file.tmp" && mv "$message_file.tmp" "$message_file"
+fi
