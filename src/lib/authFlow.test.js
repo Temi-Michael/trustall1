@@ -5,9 +5,27 @@ import {
   clearAuthIntent,
   getAuthIntent,
   getEmailSignupOutcome,
+  safeRedirectPath,
   saveAuthIntent,
   shouldCompleteGoogleSignup,
 } from './authFlow.js'
+
+test('sign-in redirects stay on this site', () => {
+  assert.equal(safeRedirectPath('/listing/phone?promotion=featured#reviews'), '/listing/phone?promotion=featured#reviews')
+  assert.equal(safeRedirectPath('/orders'), '/orders')
+  for (const unsafe of ['https://evil.example', '//evil.example', '/\\evil.example', '\\\\evil.example',
+    'javascript:alert(1)', 'evil.example', '/\tevil', '', null, undefined]) {
+    assert.equal(safeRedirectPath(unsafe), '/', `expected ${JSON.stringify(unsafe)} to be rejected`)
+  }
+})
+
+test('unsafe redirects from the URL or storage are replaced with the home page', () => {
+  const storage = createMemoryStorage()
+  storage.setItem('trustall.auth-redirect', '//evil.example/steal')
+  assert.equal(getAuthIntent(new URLSearchParams(), storage).redirectTo, '/')
+  assert.equal(getAuthIntent(new URLSearchParams('redirectTo=/%5Cevil.example'), storage).redirectTo, '/')
+  assert.match(buildAuthCallbackUrl('https://trustall.online', 'https://evil.example'), /redirectTo=%2F$/)
+})
 
 function createMemoryStorage() {
   const values = new Map()

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from './supabaseClient.js'
-import { isProfileRpcUnavailable, PUBLIC_PROFILE_COLUMNS } from './profileFields.js'
+import { fetchOwnProfile } from './profileFields.js'
 
 export function useSession() {
   const [session, setSession] = useState(null)
@@ -66,31 +66,21 @@ export function useProfile() {
     setLoading(true)
 
     async function loadProfile() {
-      const [{ data: rpcProfile, error: rpcError }, { data: contact, error: contactError }] = await Promise.all([
-        supabase.rpc('get_my_profile').maybeSingle(),
+      const [ownProfile, { data: contact, error: contactError }] = await Promise.all([
+        fetchOwnProfile(supabase, session.user.id),
         supabase
-        .from('profile_contacts')
-        .select('phone')
-        .eq('id', session.user.id)
-        .maybeSingle(),
+          .from('profile_contacts')
+          .select('phone')
+          .eq('id', session.user.id)
+          .maybeSingle(),
       ])
 
       if (contactError && contactError.code !== 'PGRST116') {
         console.warn('Contact details lookup failed:', contactError)
       }
 
-      if (!rpcError) return { profile: rpcProfile, phone: contact?.phone ?? null }
-      if (!isProfileRpcUnavailable(rpcError)) throw rpcError
-
-      console.warn('Private profile RPC is unavailable; loading public profile fields only.')
-      const { data: publicProfile, error: publicProfileError } = await supabase
-        .from('profiles')
-        .select(PUBLIC_PROFILE_COLUMNS)
-        .eq('id', session.user.id)
-        .maybeSingle()
-
-      if (publicProfileError) throw publicProfileError
-      return { profile: publicProfile, phone: contact?.phone ?? null }
+      // Before migration 0028 the phone number is still on the profile row.
+      return { profile: ownProfile, phone: contact?.phone ?? ownProfile?.phone ?? null }
     }
 
     loadProfile()

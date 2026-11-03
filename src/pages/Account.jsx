@@ -65,8 +65,11 @@ export default function Account() {
     return (
       <section className="mx-auto max-w-xl px-6 py-24 text-center">
         <h1 className="font-display text-2xl font-bold text-ink">Your profile could not be loaded</h1>
+        {/* The technical error is already logged by useProfile; users get plain words. */}
         <p role="alert" className="mt-3 text-sm text-muted">
-          {profileError?.message || 'No profile record is available for this account.'}
+          {profileError
+            ? 'Something went wrong while loading your profile. Please try again in a moment.'
+            : 'No profile record is available for this account.'}
         </p>
         <button type="button" onClick={() => window.location.reload()} className="mt-5 rounded-full bg-seal px-5 py-2.5 text-sm font-semibold text-white">
           Try again

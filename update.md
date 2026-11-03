@@ -100,8 +100,18 @@ grant select (new_column) on public.profiles to anon, authenticated;
 - **Private dispute evidence:** only the people in a dispute (and admins) can see its files. The dispute page uses links that expire after an hour.
 - **Project notes:** the old notes (deploy guides, feature write-ups) now live in `docs/`.
 
-## 7. Rolling this out
+## 7. Tooling and safety (November 2026)
 
+- **`npm test`:** runs every unit test in `src/lib`. The Hostinger deploy runs it too, and a failing test stops the deploy.
+- **No AI attribution in commits:** a Git hook removes lines such as `Co-authored-by: Copilot` or `Generated with Claude Code` from commit messages. `npm install` switches it on; to switch it on by hand, run `git config core.hooksPath .githooks`.
+- **Security headers:** every host now tells browsers not to let other sites frame Trustall, and sends other standard protections (see [fix.md](fix.md) 9.7).
+- **Encrypted deploys:** the Hostinger upload uses FTPS. If a deploy fails with a TLS or certificate error, check that FTPS is enabled in Hostinger's FTP settings.
+- **Service worker v7:** it caches only fingerprinted build files and leaves other sites' requests alone. Visitors get it on their next visit, and old caches are cleared.
+- **Migration 0036:** sellers can't edit offers directly any more (they send a new offer instead), and avatar files stay in their owner's folder.
+
+## 8. Rolling this out
+
+0. **Check the live database first:** run the migration status query from [issues.md](issues.md) ("Check which migrations the live database has"). If any migration from 0001–0027 shows `false`, don't paste the bundle yet. It assumes those are applied and would skip them, so the missing ones need applying first (issue 9.2).
 1. **Database:** paste `supabase/all_migrations.sql` into the Supabase SQL Editor and click **Run**.
 2. **Server functions:** deploy the changed ones:
    ```bash

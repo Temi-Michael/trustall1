@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient.js'
 import { useProfile } from '../lib/useProfile.js'
 import { getProfileInitials } from '../lib/profileDisplay.js'
+import { fetchPayoutConnected } from '../lib/profileFields.js'
 import { markConversationRead, subscribeToMessageReadUpdates } from '../lib/readReceiptUtils.js'
 import { SealMark } from '../components/Navbar.jsx'
 import { isOnline, formatLastSeen, subscribeToUserPresence } from '../lib/presenceUtils.js'
@@ -456,9 +457,19 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
   async function loadThread() {
     const { data: convo } = await supabase
       .from('conversations')
-      .select('*, listing:listing_id(id, title, price, images, slug), buyer:buyer_id(id, business_name, full_name, avatar_url, verified_seller), seller:seller_id(id, business_name, full_name, avatar_url, verified_seller, payout_connected)')
+      .select('*, listing:listing_id(id, title, price, images, slug), buyer:buyer_id(id, business_name, full_name, avatar_url, verified_seller), seller:seller_id(id, business_name, full_name, avatar_url, verified_seller)')
       .eq('id', conversationId).single()
-    setConversation(convo)
+
+    // Looked up separately: the field differs between database versions, and a
+    // missing column in the main query would stop the whole thread loading.
+    let payoutConnected = false
+    if (convo?.seller?.id) {
+      payoutConnected = await fetchPayoutConnected(supabase, convo.seller.id).catch((error) => {
+        console.error('Could not check the seller payout account:', error)
+        return false
+      })
+    }
+    setConversation(convo ? { ...convo, seller: convo.seller && { ...convo.seller, payout_connected: payoutConnected } } : convo)
 
     let nextListing = convo?.listing || null
     if (listingId && listingId !== convo?.listing_id) {

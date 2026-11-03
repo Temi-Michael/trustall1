@@ -1,3 +1,4 @@
+import { deleteToken } from "firebase/messaging";
 import { messaging, getToken } from "./firebaseConfig";
 import { VAPID_KEY } from "./firebaseConfig";
 import { supabase } from "./supabaseClient";
@@ -150,18 +151,13 @@ export async function unregisterPushToken(userId) {
       navigator.clearAppBadge().catch(() => {});
     }
 
-    // Unregister only the Firebase messaging service worker.
-    if ("serviceWorker" in navigator) {
-      const registration = await navigator.serviceWorker.getRegistration("/firebase-messaging-sw.js");
-      if (registration) {
-        await registration.unregister();
-        console.log("Firebase messaging service worker unregistered");
-      }
+    // Cancel this device's push token so the signed-out account stops reaching
+    // it. This runs after sign-out, so the device_tokens row can't be deleted
+    // here; send-push-notification removes tokens Firebase reports as invalid.
+    // The app service worker stays registered: it also serves the offline page.
+    if (messaging) {
+      await deleteToken(messaging).catch((err) => console.warn("Could not cancel push token:", err));
     }
-
-    // Optionally remove token from database
-    // (commented out as tokens naturally expire after 24 hours of non-use)
-    // await supabase.from("device_tokens").delete().eq("user_id", userId);
   } catch (err) {
     console.error("Failed to unregister push token:", err);
   }

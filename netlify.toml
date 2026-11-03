@@ -6,3 +6,14 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# Security headers: no framing by other sites (clickjacking), no MIME sniffing,
+# and no referrer leaks to other sites.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    Content-Security-Policy = "frame-ancestors 'none'"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"

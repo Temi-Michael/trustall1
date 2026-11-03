@@ -198,10 +198,6 @@ How each fixed issue from [issues.md](issues.md) was solved. The numbers match t
 - **Admins only:** both lookups refuse anyone who isn't an admin.
 - **Where:** `Admin.jsx` (`ProfileDirectory`, `UserDetailsPanel`), `0034_admin_tools.sql`.
 
-**8.14: Rejection reason hidden from sellers**
-- **What changed:** the seller's verification panel now shows the reason the admin gave.
-- **Where:** `Sell.jsx`.
-
 **8.11: Promotions screen loaded everything**
 - **What changed:** it now looks up only the sellers and listings that the promotions on screen point at.
 
@@ -211,3 +207,69 @@ How each fixed issue from [issues.md](issues.md) was solved. The numbers match t
 **8.13: Admin actions without error checks**
 - **What changed:** dismissing a report, reactivating an account and recording a deleted document now show or log an error if the save fails, instead of failing silently.
 - **Where:** `Admin.jsx`.
+
+**8.14: Rejection reason hidden from sellers**
+- **What changed:** the seller's verification panel now shows the reason the admin gave.
+- **Where:** `Sell.jsx`.
+
+## 9. November 2026 review
+
+**9.3: Chat broke without migration 0033**
+- **What changed:** the conversation query no longer asks for `payout_connected`. A separate check (`fetchPayoutConnected`) reads that flag where it exists, and otherwise falls back to the seller's payout code, which older databases still expose. If the check fails, the thread still loads and checkout shows "payout not connected".
+- **Where:** `Messages.jsx`, `src/lib/profileFields.js`.
+
+**9.4: Profile fallback dropped private fields**
+- **What changed:** when `get_my_profile` is missing, the app now reads the whole profile row. A database without that function also has none of its column restrictions, so the referral code, wallet and payout status all come through. The phone number falls back to the profile row too, where it still lives before migration 0028.
+- **Where:** `fetchOwnProfile()` in `src/lib/profileFields.js`, `useProfile.js`.
+
+**9.5: Unchecked sign-in redirect**
+- **What changed:** every redirect address, from the URL, browser storage or in-app navigation, goes through `safeRedirectPath()`. Only paths on this site are allowed. Anything that would leave it (`https://…`, `//site`, `/\site`, `javascript:`, hidden control characters) becomes the home page.
+- **Where:** `src/lib/authFlow.js`, `Auth.jsx`.
+
+**9.6 (partly): Vulnerable dependencies**
+- **Fixed:** DOMPurify was upgraded to 3.4.17, which fixes its cross-site scripting bypasses. `react-router-dom` is on the latest 6.x patch (6.30.6), and `npm audit fix` updated `re2js`.
+- **Still open:** React Router's open-redirect fix only exists in version 7, a major upgrade that needs testing in a browser. Until then, 9.5 closes the way this app was exposed.
+
+**9.7: No security headers**
+- **What changed:** all three hosts now send these headers:
+
+  | Header | What it does |
+  |---|---|
+  | `X-Frame-Options: DENY` and `frame-ancestors 'none'` | Stop other sites embedding Trustall in a frame (clickjacking). |
+  | `X-Content-Type-Options: nosniff` | Stops browsers guessing file types. |
+  | `Referrer-Policy: strict-origin-when-cross-origin` | Keeps full page addresses private from other sites. |
+  | `Permissions-Policy` | Turns off camera, microphone and location, which the site doesn't use. |
+
+- **Hostinger only:** it also sends `Strict-Transport-Security` on HTTPS. Vercel and Netlify add that themselves.
+- **Where:** `vercel.json`, `netlify.toml`, `public/.htaccess`.
+
+**9.8: Plain FTP deploys**
+- **What changed:** the Hostinger workflow uploads over FTPS (encrypted) and uses Node 24. It runs the tests and checks that `all_migrations.sql` is up to date before building, so a failing test stops the deploy. There's a new `npm test` command for running the tests locally.
+- **Where:** `.github/workflows/deploy-hostinger.yml`, `package.json`.
+
+**9.9 and 9.11: Over-broad update rules**
+- **Offers:** sellers can no longer edit offers directly; a seller who wants a different price sends a new offer. The app never edited offers itself, and sharing a delivery address still works (tested).
+- **Avatars:** files can only be renamed within the owner's own folder.
+- **Where:** `0036_offer_and_avatar_policies.sql`.
+
+**9.10: Service worker cached too much**
+- **What changed:** the service worker now leaves requests to other sites (Supabase, Paystack, Firebase) alone. It caches only fingerprinted build files from `/assets/`, which never change. Other files on this site always come fresh, with the cached copy used only when offline. Error pages are never saved as the offline page. The cache version went up, so caches made under the old rules are cleared.
+- **Where:** `public/sw.js`.
+
+**9.12: Raw errors on the account page**
+- **What changed:** it now says "Something went wrong while loading your profile" and logs the technical details to the console instead.
+
+**9.13: `dev` and `main` drifted**
+- **What changed:** `dev` was fast-forwarded onto `main`. That only added the two merge commits, with no file changes, so the branches now match.
+
+**9.14: Duplicate service worker**
+- **What changed:** the unused `firebase-messaging-sw.js` was removed. `sw.js` now loads the same Firebase version as the app (12.17.1).
+
+**9.15: AI attribution in commits**
+- **What changed:** a Git hook (`.githooks/commit-msg`) removes AI attribution lines, such as `Co-authored-by: Copilot` or `Generated with Claude Code`, from every new commit message. Credits for real people are kept.
+- **Setup:** `npm install` turns the hook on automatically for anyone working on the repo.
+- **Not changed:** the three commits from 31 October keep their lines. They're already on GitHub, and rewriting them would need a force-push to a shared branch.
+
+**9.16: Push notifications after sign-out**
+- **What changed:** signing out now cancels this device's push token with Firebase instead of unregistering the app's service worker. The push function already deletes cancelled tokens the next time it tries them, so the account stops reaching the device.
+- **Where:** `src/lib/useRegisterPush.js`.
