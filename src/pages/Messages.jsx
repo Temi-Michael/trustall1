@@ -277,6 +277,8 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
   const [selectedFiles, setSelectedFiles] = useState([])
   const [uploadingAttachments, setUploadingAttachments] = useState(false)
   const [pendingMessages, setPendingMessages] = useState([])
+  const [composerNotice, setComposerNotice] = useState('')
+  const [threadError, setThreadError] = useState('')
   const listingContextInitialized = useRef(false)
   const messagesRef = useRef(null)
   const hasInitialMessageScroll = useRef(false)
@@ -455,10 +457,21 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
   }
 
   async function loadThread() {
-    const { data: convo } = await supabase
+    const { data: convo, error: convoError } = await supabase
       .from('conversations')
       .select('*, listing:listing_id(id, title, price, images, slug), buyer:buyer_id(id, business_name, full_name, avatar_url, verified_seller), seller:seller_id(id, business_name, full_name, avatar_url, verified_seller)')
       .eq('id', conversationId).single()
+
+    // Without this the thread would show "Loading…" forever when the query fails.
+    if (convoError || !convo) {
+      console.error('Conversation could not be loaded:', convoError)
+      setConversation(null)
+      setThreadError(convoError?.code === 'PGRST116'
+        ? 'This conversation doesn’t exist, or you’re not part of it.'
+        : 'This conversation couldn’t be loaded. Please try again.')
+      return
+    }
+    setThreadError('')
 
     // Looked up separately: the field differs between database versions, and a
     // missing column in the main query would stop the whole thread loading.
@@ -562,12 +575,14 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
       return
     }
 
+    const filesToSend = selectedFiles
     setItems((prev) => [...prev, optimisticMessage])
     setPendingMessages((prev) => [...prev, { tempId, body: trimmedBody, created_at: optimisticMessage.created_at, pending: true }])
     setBody('')
     setSelectedFiles([])
+    setComposerNotice('')
     setSending(true)
-    setUploadingAttachments(selectedFiles.length > 0)
+    setUploadingAttachments(filesToSend.length > 0)
     try {
       const { data: message, error: messageError } = await supabase
         .from('messages')
@@ -575,50 +590,44 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
         .select()
         .single()
 
+      // TC001: the database refused contact or bank details (migration 0037).
+      // Nothing was saved, so give the text back to edit.
+      if (messageError?.code === 'TC001') {
+        setItems((prev) => prev.filter((entry) => entry.id !== tempId))
+        setPendingMessages((prev) => prev.filter((entry) => entry.tempId !== tempId))
+        setBody(trimmedBody)
+        setSelectedFiles(filesToSend)
+        setComposerNotice(messageError.message)
+        return
+      }
       if (messageError) throw messageError
 
-      if (selectedFiles.length > 0) {
-        const rows = []
-        for (const [index, file] of selectedFiles.entries()) {
-          const path = `${conversationId}/${Date.now()}_${index}_${safeFileName(file.name)}`
-          const { error: uploadError } = await supabase.storage.from('message-attachments').upload(path, file, { upsert: true })
-          if (uploadError) throw uploadError
+      // Each file goes to the sender's holding folder; screen-chat-image checks
+      // it and only then makes it visible in the conversation.
+      let messageRemoved = false
+      for (const [index, file] of filesToSend.entries()) {
+        const fileName = `${Date.now()}_${index}_${safeFileName(file.name)}`
+        const pendingPath = `${conversationId}/pending/${userId}/${fileName}`
+        const { error: uploadError } = await supabase.storage.from('message-attachments').upload(pendingPath, file, { upsert: true })
+        if (uploadError) throw uploadError
 
-          let flagged = false
-          let flaggedReason = null
-          if (file.type.startsWith('image/')) {
-            const { data: moderation, error: moderationError } = await supabase.functions.invoke('moderate-chat-image', {
-              body: { path, file_type: 'image' },
-            })
-            if (moderationError) {
-              console.error('Chat image moderation failed:', moderationError)
-            } else {
-              flagged = Boolean(moderation?.flagged)
-              flaggedReason = moderation?.reason || null
-            }
-          }
-
-          rows.push({
-            message_id: message.id,
-            file_url: path,
-            file_type: file.type.startsWith('video/') ? 'video' : 'image',
-            flagged,
-            flagged_reason: flaggedReason,
-          })
-        }
-
-        if (rows.length > 0) {
-          const { error: attachmentError } = await supabase.from('message_attachments').insert(rows)
-          if (attachmentError) {
-            console.error('message_attachments insert failed:', attachmentError)
-            throw new Error(
-              'Chat media could not be saved because the database policy is not set up for message attachments. Run the migration 0017_message_attachments.sql in Supabase.'
-            )
-          }
+        const { data: screening, error: screeningError } = await supabase.functions.invoke('screen-chat-image', {
+          body: { message_id: message.id, path: pendingPath, final: index === filesToSend.length - 1 },
+        })
+        if (screeningError) {
+          console.error('Chat media screening failed:', screeningError)
+          setComposerNotice('A photo couldn’t be checked right now, so it wasn’t sent. Please try again.')
+        } else if (screening?.blocked) {
+          setComposerNotice(screening.message)
+          messageRemoved = messageRemoved || Boolean(screening.message_removed)
         }
       }
 
-      setItems((prev) => prev.map((entry) => entry.id === tempId ? { ...message, kind: 'message', pending: false, failed: false } : entry))
+      if (messageRemoved) {
+        setItems((prev) => prev.filter((entry) => entry.id !== tempId))
+      } else {
+        setItems((prev) => prev.map((entry) => entry.id === tempId ? { ...message, kind: 'message', pending: false, failed: false } : entry))
+      }
       setPendingMessages((prev) => prev.filter((entry) => entry.tempId !== tempId))
       await loadThread()
     } catch (error) {
@@ -631,6 +640,16 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
     }
   }
 
+  if (threadError && !conversation) {
+    return (
+      <div className="rounded-2xl border border-hairline bg-white p-6 text-center">
+        <p role="alert" className="text-sm text-ink">{threadError}</p>
+        <button type="button" onClick={() => { setThreadError(''); loadThread() }} className="mt-4 rounded-full bg-seal px-4 py-2 text-sm font-semibold text-surface hover:bg-seal/90">
+          Try again
+        </button>
+      </div>
+    )
+  }
   if (!conversation) return <div className="rounded-2xl border border-hairline bg-white p-6 text-muted">Loading…</div>
 
   const isSeller = conversation.seller.id === userId
@@ -778,6 +797,11 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
                 <span className="max-w-[55vw] truncate text-[10px] text-seal">{selectedFiles.length} file{selectedFiles.length === 1 ? '' : 's'} selected</span>
             )}
           </div>
+          {composerNotice && (
+            <p role="alert" className="mb-2 rounded-xl bg-marigold/10 px-3 py-2 text-xs leading-relaxed text-marigold-deep">
+              {composerNotice}
+            </p>
+          )}
           <div className="flex gap-2">
             <input
               value={body}
@@ -1332,7 +1356,8 @@ function OfferForm({ conversationId, sellerId, onDone }) {
     } catch (err) {
       setSubmitting(false)
       console.error('Error creating offer:', err)
-      alert(`Failed to create offer: ${err.message}`)
+      // TC001: the offer text had contact or bank details; the message says so plainly.
+      alert(err.code === 'TC001' ? err.message : `Failed to create offer: ${err.message}`)
     }
   }
 

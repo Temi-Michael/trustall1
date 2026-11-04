@@ -35,12 +35,15 @@ Deno.serve(async (req) => {
     const prompt = query || 'Hello, please tell me about Trustall and how it works.'
 
     if (geminiApiKey) {
+      // Set GEMINI_MODEL in the project secrets to switch models without a deploy.
+      const geminiModel = Deno.env.get('GEMINI_MODEL') || 'gemini-3.5-flash'
       const geminiResponse = await fetch(
-        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + encodeURIComponent(geminiApiKey),
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'x-goog-api-key': geminiApiKey,
           },
           body: JSON.stringify({
             contents: [
@@ -111,11 +114,12 @@ Deno.serve(async (req) => {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${openAiApiKey}`,
       },
+      // Set OPENAI_MODEL in the project secrets to switch models without a deploy.
+      // Newer models take max_completion_tokens and only their default temperature.
       body: JSON.stringify({
-        model: 'gpt-3.5-turbo',
+        model: Deno.env.get('OPENAI_MODEL') || 'gpt-5-mini',
         messages: promptMessages,
-        max_tokens: 250,
-        temperature: 0.7,
+        max_completion_tokens: 2000,
       }),
     })
 
