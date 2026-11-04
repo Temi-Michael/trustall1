@@ -96,20 +96,24 @@ create trigger trg_on_review_updated after update on public.reviews for each row
 alter table public.reviews enable row level security;
 
 drop policy if exists "Buyers review only confirmed orders" on public.reviews;
+drop policy if exists "Buyers review seller after confirmation" on public.reviews;
 create policy "Buyers review seller after confirmation" on public.reviews for insert with check (
   reviewer_id = auth.uid()
   and review_type = 'buyer_to_seller'
   and exists (select 1 from public.orders o where o.id = order_id and o.buyer_id = auth.uid() and o.status = 'confirmed')
 );
 
+drop policy if exists "Sellers review buyer after confirmation" on public.reviews;
 create policy "Sellers review buyer after confirmation" on public.reviews for insert with check (
   reviewer_id = auth.uid()
   and review_type = 'seller_to_buyer'
   and exists (select 1 from public.orders o where o.id = order_id and o.seller_id = auth.uid() and o.status = 'confirmed')
 );
 
+drop policy if exists "Users view their reviews" on public.reviews;
 create policy "Users view their reviews" on public.reviews for select using (
   reviewer_id = auth.uid() or seller_id = auth.uid() or buyer_id = auth.uid() or public.is_admin() or true
 );
 
+drop policy if exists "Users update own reviews" on public.reviews;
 create policy "Users update own reviews" on public.reviews for update using (reviewer_id = auth.uid() or public.is_admin()) with check (reviewer_id = auth.uid() or public.is_admin());

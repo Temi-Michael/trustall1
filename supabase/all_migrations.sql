@@ -12,37 +12,46 @@ create table if not exists private.applied_migrations (
   applied_at timestamptz not null default now()
 );
 
--- Existing database built before history was tracked: record what was already applied.
+-- Existing database built before history was tracked: record the early
+-- migrations whose marker objects exist. Missing ones run below, in order.
 do $bundle$
+declare
+  v_recorded integer;
 begin
   if to_regclass('public.profiles') is not null
      and not exists (select 1 from private.applied_migrations) then
-    insert into private.applied_migrations (name) values
-      ('0001_init_marketplace_schema.sql'),
-      ('0002_levels_escrow_digital_referral.sql'),
-      ('0003_triggers_and_referral_logic.sql'),
-      ('0004_conversation_read_state.sql'),
-      ('0005_avatar_storage.sql'),
-      ('0006_conversation_last_read.sql'),
-      ('0007_bidir_reviews_and_dashboard_analytics.sql'),
-      ('0008_offer_delivery_logistics.sql'),
-      ('0009_admin_verification_realtime.sql'),
-      ('0011_offer_delivery_fields.sql'),
-      ('0012_add_offer_variants_and_services.sql'),
-      ('0013_add_services_included_to_listings.sql'),
-      ('0014_notifications_system.sql'),
-      ('0015_fix_offer_delivery_columns.sql'),
-      ('0016_order_lifecycle_notifications_and_wallet.sql'),
-      ('0017_message_attachments.sql'),
-      ('0019_message_attachments_bucket.sql'),
-      ('0021_admin_dashboard_audit.sql'),
-      ('0022_mark_profile_as_seller_on_listing.sql'),
-      ('0023_dispute_notifications.sql'),
-      ('0024_admin_targeted_notifications.sql'),
-      ('0025_conversation_read_state_rpc.sql'),
-      ('0026_share_offer_delivery_address.sql'),
-      ('0027_paystack_transfer_recipients.sql');
-    raise notice 'Recorded % migrations that were applied before history was tracked', 24;
+    insert into private.applied_migrations (name)
+    select legacy.name from (values
+      ('0001_init_marketplace_schema.sql', to_regclass('public.profiles') is not null),
+      ('0002_levels_escrow_digital_referral.sql', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name = 'handle')),
+      ('0003_triggers_and_referral_logic.sql', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'generate_referral_code')),
+      ('0004_conversation_read_state.sql', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name = 'last_seen_at')),
+      ('0005_avatar_storage.sql', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name = 'business_logo_url')),
+      ('0006_conversation_last_read.sql', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'conversations' and column_name = 'seller_last_read_at')),
+      ('0007_bidir_reviews_and_dashboard_analytics.sql', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name = 'buyer_avg_rating')),
+      ('0008_offer_delivery_logistics.sql', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'offers' and column_name = 'delivery_speed')),
+      ('0009_admin_verification_realtime.sql', exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'verification_requests')),
+      ('0010_chat_presence_and_read_receipts.sql', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'messages' and column_name = 'is_read')),
+      ('0011_offer_delivery_fields.sql', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'offers' and column_name = 'delivery_type')),
+      ('0012_add_offer_variants_and_services.sql', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'offers' and column_name = 'variants')),
+      ('0013_add_services_included_to_listings.sql', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'listings' and column_name = 'services_included')),
+      ('0014_notifications_system.sql', to_regclass('public.notifications') is not null),
+      ('0016_order_lifecycle_notifications_and_wallet.sql', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'record_payment_as_pending')),
+      ('0017_message_attachments.sql', to_regclass('public.message_attachments') is not null),
+      ('0018_fix_offer_and_order_notifications.sql', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'notify_order_confirmed')),
+      ('0019_message_attachments_bucket.sql', exists (select 1 from storage.buckets where id = 'message-attachments')),
+      ('0020_disputes_table.sql', to_regclass('public.disputes') is not null),
+      ('0021_admin_dashboard_audit.sql', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'get_admin_dashboard')),
+      ('0022_mark_profile_as_seller_on_listing.sql', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'mark_profile_as_seller_on_listing')),
+      ('0023_dispute_notifications.sql', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'notifications' and column_name = 'related_dispute_id')),
+      ('0024_admin_targeted_notifications.sql', exists (select 1 from pg_policies where policyname = 'Admins can insert marketing notifications')),
+      ('0025_conversation_read_state_rpc.sql', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'mark_conversation_read')),
+      ('0026_share_offer_delivery_address.sql', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'share_offer_delivery_address')),
+      ('0027_paystack_transfer_recipients.sql', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name = 'paystack_recipient_code'))
+    ) as legacy(name, present)
+    where legacy.present;
+    get diagnostics v_recorded = row_count;
+    raise notice 'Recorded % of % early migrations as already applied', v_recorded, 26;
   end if;
 end
 $bundle$;
@@ -505,9 +514,13 @@ alter table public.profiles
   add column if not exists business_logo_url text;
 
 insert into storage.buckets (id, name, public) values ('avatars', 'avatars', true) on conflict (id) do nothing;
+drop policy if exists "Users upload own avatars" on storage.objects;
 create policy "Users upload own avatars" on storage.objects for insert with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists "Public can view avatars" on storage.objects;
 create policy "Public can view avatars" on storage.objects for select using (bucket_id = 'avatars');
+drop policy if exists "Users update own avatars" on storage.objects;
 create policy "Users update own avatars" on storage.objects for update using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists "Users delete own avatars" on storage.objects;
 create policy "Users delete own avatars" on storage.objects for delete using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
 $m0005$;
   insert into private.applied_migrations (name) values ('0005_avatar_storage.sql');
@@ -644,22 +657,26 @@ create trigger trg_on_review_updated after update on public.reviews for each row
 alter table public.reviews enable row level security;
 
 drop policy if exists "Buyers review only confirmed orders" on public.reviews;
+drop policy if exists "Buyers review seller after confirmation" on public.reviews;
 create policy "Buyers review seller after confirmation" on public.reviews for insert with check (
   reviewer_id = auth.uid()
   and review_type = 'buyer_to_seller'
   and exists (select 1 from public.orders o where o.id = order_id and o.buyer_id = auth.uid() and o.status = 'confirmed')
 );
 
+drop policy if exists "Sellers review buyer after confirmation" on public.reviews;
 create policy "Sellers review buyer after confirmation" on public.reviews for insert with check (
   reviewer_id = auth.uid()
   and review_type = 'seller_to_buyer'
   and exists (select 1 from public.orders o where o.id = order_id and o.seller_id = auth.uid() and o.status = 'confirmed')
 );
 
+drop policy if exists "Users view their reviews" on public.reviews;
 create policy "Users view their reviews" on public.reviews for select using (
   reviewer_id = auth.uid() or seller_id = auth.uid() or buyer_id = auth.uid() or public.is_admin() or true
 );
 
+drop policy if exists "Users update own reviews" on public.reviews;
 create policy "Users update own reviews" on public.reviews for update using (reviewer_id = auth.uid() or public.is_admin()) with check (reviewer_id = auth.uid() or public.is_admin());
 $m0007$;
   insert into private.applied_migrations (name) values ('0007_bidir_reviews_and_dashboard_analytics.sql');
@@ -1273,6 +1290,7 @@ alter table public.message_attachments enable row level security;
 create index if not exists idx_message_attachments_message_id
   on public.message_attachments (message_id);
 
+drop policy if exists "Participants view message attachments" on public.message_attachments;
 create policy "Participants view message attachments"
 on public.message_attachments for select
 using (
@@ -1286,6 +1304,7 @@ using (
   or public.is_admin()
 );
 
+drop policy if exists "Participants insert message attachments" on public.message_attachments;
 create policy "Participants insert message attachments"
 on public.message_attachments for insert
 with check (
@@ -1300,6 +1319,7 @@ with check (
   or public.is_admin()
 );
 
+drop policy if exists "Participants delete own message attachments" on public.message_attachments;
 create policy "Participants delete own message attachments"
 on public.message_attachments for delete
 using (
@@ -1314,10 +1334,12 @@ using (
   or public.is_admin()
 );
 
+drop policy if exists "Public read uploaded chat media" on storage.objects;
 create policy "Public read uploaded chat media"
 on storage.objects for select
 using (bucket_id = 'message-attachments');
 
+drop policy if exists "Authenticated users upload chat media" on storage.objects;
 create policy "Authenticated users upload chat media"
 on storage.objects for insert
 with check (
@@ -1325,11 +1347,13 @@ with check (
   and auth.uid() is not null
 );
 
+drop policy if exists "Authenticated users update their chat media" on storage.objects;
 create policy "Authenticated users update their chat media"
 on storage.objects for update
 using (bucket_id = 'message-attachments' and auth.uid() is not null)
 with check (bucket_id = 'message-attachments' and auth.uid() is not null);
 
+drop policy if exists "Authenticated users delete chat media" on storage.objects;
 create policy "Authenticated users delete chat media"
 on storage.objects for delete
 using (bucket_id = 'message-attachments' and auth.uid() is not null);
@@ -1749,6 +1773,7 @@ begin
   end if;
   execute $m0024$
 -- Allow admins to send targeted marketing notifications from the admin dashboard.
+drop policy if exists "Admins can insert marketing notifications" on public.notifications;
 create policy "Admins can insert marketing notifications" on public.notifications
   for insert
   with check (public.is_admin() and type = 'marketing');

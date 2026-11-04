@@ -11,6 +11,7 @@ alter table public.message_attachments enable row level security;
 create index if not exists idx_message_attachments_message_id
   on public.message_attachments (message_id);
 
+drop policy if exists "Participants view message attachments" on public.message_attachments;
 create policy "Participants view message attachments"
 on public.message_attachments for select
 using (
@@ -24,6 +25,7 @@ using (
   or public.is_admin()
 );
 
+drop policy if exists "Participants insert message attachments" on public.message_attachments;
 create policy "Participants insert message attachments"
 on public.message_attachments for insert
 with check (
@@ -38,6 +40,7 @@ with check (
   or public.is_admin()
 );
 
+drop policy if exists "Participants delete own message attachments" on public.message_attachments;
 create policy "Participants delete own message attachments"
 on public.message_attachments for delete
 using (
@@ -52,10 +55,12 @@ using (
   or public.is_admin()
 );
 
+drop policy if exists "Public read uploaded chat media" on storage.objects;
 create policy "Public read uploaded chat media"
 on storage.objects for select
 using (bucket_id = 'message-attachments');
 
+drop policy if exists "Authenticated users upload chat media" on storage.objects;
 create policy "Authenticated users upload chat media"
 on storage.objects for insert
 with check (
@@ -63,11 +68,13 @@ with check (
   and auth.uid() is not null
 );
 
+drop policy if exists "Authenticated users update their chat media" on storage.objects;
 create policy "Authenticated users update their chat media"
 on storage.objects for update
 using (bucket_id = 'message-attachments' and auth.uid() is not null)
 with check (bucket_id = 'message-attachments' and auth.uid() is not null);
 
+drop policy if exists "Authenticated users delete chat media" on storage.objects;
 create policy "Authenticated users delete chat media"
 on storage.objects for delete
 using (bucket_id = 'message-attachments' and auth.uid() is not null);
