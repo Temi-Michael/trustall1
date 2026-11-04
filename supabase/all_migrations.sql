@@ -1955,6 +1955,43 @@ begin
 -- Security lockdown: protected profile columns, private phone numbers, RPC-only
 -- order updates, encrypted verification ID numbers and private chat attachments.
 
+-- A database built outside migrations may already have a function with the same
+-- name and arguments but a different return type, which "create or replace"
+-- can't change. Drop such a function first so it can be recreated; one with the
+-- same return type is left alone. Later migrations use this too.
+create schema if not exists private;
+
+create or replace function private.drop_function_if_result_differs(p_name text, p_args text, p_result text)
+returns void
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_function regprocedure;
+begin
+  select p.oid::regprocedure into v_function
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and p.proname = p_name
+    and oidvectortypes(p.proargtypes) = p_args
+    and replace(lower(pg_get_function_result(p.oid)), 'public.', '') <> lower(p_result);
+
+  if v_function is not null then
+    execute format('drop function %s', v_function);
+    raise notice 'Replaced % because it returned a different type', v_function;
+  end if;
+end;
+$$;
+
+select private.drop_function_if_result_differs('guard_profile_self_update', '', 'trigger');
+select private.drop_function_if_result_differs('mark_order_fulfilled', 'uuid', 'jsonb');
+select private.drop_function_if_result_differs('record_payment_as_pending', 'uuid', 'jsonb');
+select private.drop_function_if_result_differs('confirm_delivery_and_release_payment', 'uuid', 'jsonb');
+select private.drop_function_if_result_differs('encrypt_verification_id_number', '', 'trigger');
+select private.drop_function_if_result_differs('reveal_verification_id_number', 'uuid', 'text');
+select private.drop_function_if_result_differs('is_conversation_participant', 'text', 'boolean');
+
 -- ---------------------------------------------------------------------------
 -- 1. Profiles: users may only edit their own public-facing fields.
 -- ---------------------------------------------------------------------------
@@ -2399,6 +2436,10 @@ begin
 -- TRUST-TOP-T73XBA6S. Every reference is recorded once, bound to the user and
 -- the thing it pays for, so it cannot be guessed or replayed.
 
+-- Replace same-named functions that return a different type (see 0028).
+select private.drop_function_if_result_differs('new_transaction_reference', 'text, uuid, uuid', 'text');
+select private.drop_function_if_result_differs('issue_order_payment_reference', 'uuid', 'text');
+
 create schema if not exists private;
 revoke all on schema private from public, anon, authenticated;
 
@@ -2533,6 +2574,9 @@ begin
 -- Refunds and reversals must point at the payment they undo (TRUST-ORD-..., or a
 -- pre-ledger trustall_... Paystack reference), so every money movement can be
 -- traced back to its original transaction.
+
+-- Replace same-named functions that return a different type (see 0028).
+select private.drop_function_if_result_differs('new_transaction_reference', 'text, uuid, uuid, text', 'text');
 
 alter table public.transaction_references
   add column if not exists original_reference text;
@@ -2765,6 +2809,11 @@ begin
 -- New public profile columns must be granted explicitly in their migration:
 --   grant select (new_column) on public.profiles to anon, authenticated;
 
+-- Replace same-named functions that return a different type (see 0028).
+select private.drop_function_if_result_differs('guard_profile_self_update', '', 'trigger');
+select private.drop_function_if_result_differs('get_my_profile', '', 'SETOF profiles');
+select private.drop_function_if_result_differs('admin_get_profiles', 'uuid[]', 'SETOF profiles');
+
 -- Others only need to know whether a seller can be paid, not the account code.
 alter table public.profiles
   add column if not exists payout_connected boolean
@@ -2863,6 +2912,14 @@ begin
 -- Admin tooling: an audit log of every admin change, atomic verification and
 -- warning actions, listing approval enforced by the database, and user search
 -- and detail lookups for the admin dashboard.
+
+-- Replace same-named functions that return a different type (see 0028).
+select private.drop_function_if_result_differs('log_admin_change', '', 'trigger');
+select private.drop_function_if_result_differs('admin_review_verification', 'uuid, boolean, text', 'jsonb');
+select private.drop_function_if_result_differs('admin_issue_warning', 'uuid', 'jsonb');
+select private.drop_function_if_result_differs('guard_listing_moderation', '', 'trigger');
+select private.drop_function_if_result_differs('admin_search_users', 'text, text, integer, integer', 'TABLE(id uuid, full_name text, business_name text, handle text, email text, is_seller boolean, verified_seller boolean, status text, role text, created_at timestamp with time zone)');
+select private.drop_function_if_result_differs('admin_get_user_details', 'uuid', 'jsonb');
 
 -- ---------------------------------------------------------------------------
 -- 1. Audit log: written by triggers whenever an admin changes a watched table.
@@ -3229,6 +3286,11 @@ begin
   execute $m0035$
 -- Private dispute evidence, and a rate limiter for server functions and RPCs.
 
+-- Replace same-named functions that return a different type (see 0028).
+select private.drop_function_if_result_differs('can_access_dispute', 'text', 'boolean');
+select private.drop_function_if_result_differs('consume_rate_limit', 'text, integer, integer', 'boolean');
+select private.drop_function_if_result_differs('issue_order_payment_reference', 'uuid', 'text');
+
 -- ---------------------------------------------------------------------------
 -- 1. Dispute evidence: private bucket, visible only to the people in the case.
 -- ---------------------------------------------------------------------------
@@ -3408,6 +3470,10 @@ begin
 -- Keep deals inside Trustall: chat messages and offers can't carry phone
 -- numbers, emails, links, social handles or bank details, and chat images are
 -- screened on the server before the other person can see them.
+
+-- Replace same-named functions that return a different type (see 0028).
+select private.drop_function_if_result_differs('chat_contact_violation', 'text', 'text');
+select private.drop_function_if_result_differs('block_contact_details', '', 'trigger');
 
 -- ---------------------------------------------------------------------------
 -- 1. Text: refuse contact details in messages and offers.

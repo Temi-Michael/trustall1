@@ -1,5 +1,10 @@
 -- Private dispute evidence, and a rate limiter for server functions and RPCs.
 
+-- Replace same-named functions that return a different type (see 0028).
+select private.drop_function_if_result_differs('can_access_dispute', 'text', 'boolean');
+select private.drop_function_if_result_differs('consume_rate_limit', 'text, integer, integer', 'boolean');
+select private.drop_function_if_result_differs('issue_order_payment_reference', 'uuid', 'text');
+
 -- ---------------------------------------------------------------------------
 -- 1. Dispute evidence: private bucket, visible only to the people in the case.
 -- ---------------------------------------------------------------------------

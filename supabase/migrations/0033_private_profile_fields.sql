@@ -12,6 +12,11 @@
 -- New public profile columns must be granted explicitly in their migration:
 --   grant select (new_column) on public.profiles to anon, authenticated;
 
+-- Replace same-named functions that return a different type (see 0028).
+select private.drop_function_if_result_differs('guard_profile_self_update', '', 'trigger');
+select private.drop_function_if_result_differs('get_my_profile', '', 'SETOF profiles');
+select private.drop_function_if_result_differs('admin_get_profiles', 'uuid[]', 'SETOF profiles');
+
 -- Others only need to know whether a seller can be paid, not the account code.
 alter table public.profiles
   add column if not exists payout_connected boolean

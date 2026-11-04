@@ -2,6 +2,14 @@
 -- warning actions, listing approval enforced by the database, and user search
 -- and detail lookups for the admin dashboard.
 
+-- Replace same-named functions that return a different type (see 0028).
+select private.drop_function_if_result_differs('log_admin_change', '', 'trigger');
+select private.drop_function_if_result_differs('admin_review_verification', 'uuid, boolean, text', 'jsonb');
+select private.drop_function_if_result_differs('admin_issue_warning', 'uuid', 'jsonb');
+select private.drop_function_if_result_differs('guard_listing_moderation', '', 'trigger');
+select private.drop_function_if_result_differs('admin_search_users', 'text, text, integer, integer', 'TABLE(id uuid, full_name text, business_name text, handle text, email text, is_seller boolean, verified_seller boolean, status text, role text, created_at timestamp with time zone)');
+select private.drop_function_if_result_differs('admin_get_user_details', 'uuid', 'jsonb');
+
 -- ---------------------------------------------------------------------------
 -- 1. Audit log: written by triggers whenever an admin changes a watched table.
 -- ---------------------------------------------------------------------------

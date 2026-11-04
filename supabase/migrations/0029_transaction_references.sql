@@ -2,6 +2,10 @@
 -- TRUST-TOP-T73XBA6S. Every reference is recorded once, bound to the user and
 -- the thing it pays for, so it cannot be guessed or replayed.
 
+-- Replace same-named functions that return a different type (see 0028).
+select private.drop_function_if_result_differs('new_transaction_reference', 'text, uuid, uuid', 'text');
+select private.drop_function_if_result_differs('issue_order_payment_reference', 'uuid', 'text');
+
 create schema if not exists private;
 revoke all on schema private from public, anon, authenticated;
 

@@ -2,6 +2,10 @@
 -- numbers, emails, links, social handles or bank details, and chat images are
 -- screened on the server before the other person can see them.
 
+-- Replace same-named functions that return a different type (see 0028).
+select private.drop_function_if_result_differs('chat_contact_violation', 'text', 'text');
+select private.drop_function_if_result_differs('block_contact_details', '', 'trigger');
+
 -- ---------------------------------------------------------------------------
 -- 1. Text: refuse contact details in messages and offers.
 -- ---------------------------------------------------------------------------

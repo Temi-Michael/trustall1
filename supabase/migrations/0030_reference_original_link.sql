@@ -2,6 +2,9 @@
 -- pre-ledger trustall_... Paystack reference), so every money movement can be
 -- traced back to its original transaction.
 
+-- Replace same-named functions that return a different type (see 0028).
+select private.drop_function_if_result_differs('new_transaction_reference', 'text, uuid, uuid, text', 'text');
+
 alter table public.transaction_references
   add column if not exists original_reference text;
 

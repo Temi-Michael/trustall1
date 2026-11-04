@@ -1,6 +1,43 @@
 -- Security lockdown: protected profile columns, private phone numbers, RPC-only
 -- order updates, encrypted verification ID numbers and private chat attachments.
 
+-- A database built outside migrations may already have a function with the same
+-- name and arguments but a different return type, which "create or replace"
+-- can't change. Drop such a function first so it can be recreated; one with the
+-- same return type is left alone. Later migrations use this too.
+create schema if not exists private;
+
+create or replace function private.drop_function_if_result_differs(p_name text, p_args text, p_result text)
+returns void
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_function regprocedure;
+begin
+  select p.oid::regprocedure into v_function
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and p.proname = p_name
+    and oidvectortypes(p.proargtypes) = p_args
+    and replace(lower(pg_get_function_result(p.oid)), 'public.', '') <> lower(p_result);
+
+  if v_function is not null then
+    execute format('drop function %s', v_function);
+    raise notice 'Replaced % because it returned a different type', v_function;
+  end if;
+end;
+$$;
+
+select private.drop_function_if_result_differs('guard_profile_self_update', '', 'trigger');
+select private.drop_function_if_result_differs('mark_order_fulfilled', 'uuid', 'jsonb');
+select private.drop_function_if_result_differs('record_payment_as_pending', 'uuid', 'jsonb');
+select private.drop_function_if_result_differs('confirm_delivery_and_release_payment', 'uuid', 'jsonb');
+select private.drop_function_if_result_differs('encrypt_verification_id_number', '', 'trigger');
+select private.drop_function_if_result_differs('reveal_verification_id_number', 'uuid', 'text');
+select private.drop_function_if_result_differs('is_conversation_participant', 'text', 'boolean');
+
 -- ---------------------------------------------------------------------------
 -- 1. Profiles: users may only edit their own public-facing fields.
 -- ---------------------------------------------------------------------------
