@@ -1,0 +1,55 @@
+name: Deploy Supabase functions
+
+# Manual only: Actions → Deploy Supabase functions → Run workflow.
+# Sends the server functions in supabase/functions to the Supabase project, so
+# nothing has to be installed or signed in on a personal computer.
+#
+# Needs two repository secrets (Settings → Secrets and variables → Actions):
+#   SUPABASE_ACCESS_TOKEN  Supabase dashboard → account avatar → Access Tokens
+#   SUPABASE_PROJECT_ID    from https://supabase.com/dashboard/project/<this-part>
+# Function settings such as GEMINI_API_KEY live in Supabase, not here.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+
+    steps:
+      - name: Check the secrets are set
+        run: |
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ] || [ -z "$SUPABASE_PROJECT_ID" ]; then
+            echo "::error::Add the SUPABASE_ACCESS_TOKEN and SUPABASE_PROJECT_ID repository secrets first."
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install the Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # Called without a signed-in user: the AI chat by signed-out visitors, the
+      # push function by the database webhook. Each checks access itself (rate
+      # limit / x-push-secret), so Supabase's JWT check is turned off for them.
+      - name: Deploy public functions
+        run: |
+          for fn in ai-matchmaker send-push-notification; do
+            echo "Deploying $fn"
+            supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_ID" --no-verify-jwt
+          done
+
+      # Called by signed-in users only; Supabase checks their session first.
+      - name: Deploy signed-in functions
+        run: |
+          for fn in paystack-verify-payment paystack-prepare-checkout paystack-create-subaccount \
+                    paystack-create-recipient send-notification-email upload-proxy screen-chat-image; do
+            echo "Deploying $fn"
+            supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_ID"
+          done
