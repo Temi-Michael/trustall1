@@ -35,6 +35,9 @@ jobs:
         with:
           version: latest
 
+      # --yes: the CLI asks for confirmation before deploying, and a CI run has
+      # no terminal to answer it. Clicking "Run workflow" is the confirmation.
+
       # Called without a signed-in user: the AI chat by signed-out visitors, the
       # push function by the database webhook. Each checks access itself (rate
       # limit / x-push-secret), so Supabase's JWT check is turned off for them.
@@ -42,7 +45,7 @@ jobs:
         run: |
           for fn in ai-matchmaker send-push-notification; do
             echo "Deploying $fn"
-            supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_ID" --no-verify-jwt
+            supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_ID" --no-verify-jwt --yes
           done
 
       # Called by signed-in users only; Supabase checks their session first.
@@ -51,5 +54,5 @@ jobs:
           for fn in paystack-verify-payment paystack-prepare-checkout paystack-create-subaccount \
                     paystack-create-recipient send-notification-email upload-proxy screen-chat-image; do
             echo "Deploying $fn"
-            supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_ID"
+            supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_ID" --yes
           done
