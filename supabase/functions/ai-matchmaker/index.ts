@@ -1,20 +1,20 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { clientIp, TOO_MANY_REQUESTS, withinRateLimit } from "../_shared/rateLimit.ts";
+import { corsHeadersFor, rejectOtherOrigins } from "../_shared/cors.js";
 
 // Shown to users instead of provider or configuration errors, which stay in the logs.
 const UNAVAILABLE = 'The assistant is unavailable right now. Please try again later.'
 
 Deno.serve(async (req) => {
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  }
+  const corsHeaders = corsHeadersFor(req)
 
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
+  // Signed-out visitors can use this, so refuse other sites before any AI call.
+  const otherSite = rejectOtherOrigins(req, corsHeaders)
+  if (otherSite) return otherSite
 
   try {
     // Open to signed-out visitors, so limit by address: 20 questions per 10 minutes.

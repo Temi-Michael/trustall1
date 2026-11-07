@@ -1,12 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 import { isUuid, secretsMatch } from "../_shared/validate.ts"
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-push-secret",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-}
+import { corsHeadersFor, rejectOtherOrigins } from "../_shared/cors.js"
 
 function base64Url(value: string | Uint8Array) {
   const bytes = typeof value === "string" ? new TextEncoder().encode(value) : value
@@ -55,7 +50,11 @@ async function createFirebaseAccessToken(serviceAccount: Record<string, string>)
 }
 
 Deno.serve(async (request) => {
+  // Called by the database webhook, which sends no Origin; browsers on other sites are refused.
+  const corsHeaders = corsHeadersFor(request, ["x-push-secret"])
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
+  const otherSite = rejectOtherOrigins(request, corsHeaders)
+  if (otherSite) return otherSite
 
   try {
     // Only the database webhook may trigger pushes. Without the secret configured

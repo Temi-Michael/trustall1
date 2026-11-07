@@ -4,6 +4,7 @@ import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 import { isUuid } from "../_shared/validate.ts";
 import { TOO_MANY_REQUESTS, withinRateLimit } from "../_shared/rateLimit.ts";
 import { BLOCKED_MESSAGE, parseScreeningReply, SCREENING_PROMPT, UNAVAILABLE_MESSAGE } from "../_shared/mediaScreening.js";
+import { corsHeadersFor, rejectOtherOrigins } from "../_shared/cors.js";
 
 // Screens a chat photo or video before the other person can see it.
 // The browser uploads to <conversation>/pending/<sender>/<file>, which only the
@@ -18,15 +19,6 @@ const MAX_SCREEN_BYTES = 20 * 1024 * 1024;
 const PENDING_PATH = /^([0-9a-f-]{36})\/pending\/([0-9a-f-]{36})\/([\w.-]{1,150})$/i;
 
 type Verdict = { status: "clean" | "blocked" | "unavailable"; reason?: string };
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
-
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-}
 
 async function screenWithGemini(key: string, mimeType: string, data: string): Promise<Verdict> {
   const model = Deno.env.get("GEMINI_MODEL") || "gemini-3.5-flash";
@@ -101,7 +93,13 @@ async function screen(file: Blob, mimeType: string, isVideo: boolean): Promise<V
 }
 
 Deno.serve(async (req) => {
+  const corsHeaders = corsHeadersFor(req);
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  const otherSite = rejectOtherOrigins(req, corsHeaders);
+  if (otherSite) return otherSite;
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   try {

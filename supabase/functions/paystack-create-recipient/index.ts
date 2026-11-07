@@ -1,20 +1,17 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { TOO_MANY_REQUESTS, withinRateLimit } from "../_shared/rateLimit.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Content-Type": "application/json",
-};
-
-function jsonResponse(body: Record<string, unknown>, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: corsHeaders });
-}
+import { corsHeadersFor, rejectOtherOrigins } from "../_shared/cors.js";
 
 Deno.serve(async (request) => {
+  // Per request: the allowed origin depends on who is calling.
+  const corsHeaders = { ...corsHeadersFor(request), "Content-Type": "application/json" };
+  const jsonResponse = (body: Record<string, unknown>, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: corsHeaders });
+
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  const otherSite = rejectOtherOrigins(request, corsHeaders);
+  if (otherSite) return otherSite;
   if (request.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405);
 
   try {
