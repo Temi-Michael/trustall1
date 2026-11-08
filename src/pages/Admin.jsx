@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Activity, BookOpenText, ChevronDown, CircleDollarSign, ClipboardCheck, FileWarning, LayoutDashboard, Megaphone, Pause, Play, Scale, Search, ShieldCheck, Store, Users, Wallet, X } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient.js'
+import { signOutThisDevice } from '../lib/signOut.js'
 import { LISTING_CATEGORIES } from '../lib/listingCategories.js'
 import { NIGERIAN_BANKS } from '../lib/nigerianBanks.js'
 import { escapeLikePattern, safeFileName } from '../lib/inputSafety.js'
@@ -15,11 +16,9 @@ export default function Admin() {
   const [profile, setProfile] = useState(null)
   const [profileLoading, setProfileLoading] = useState(true)
   const [checking, setChecking] = useState(true)
-  const [mode, setMode] = useState('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
-  const [info, setInfo] = useState('')
 
   // Supabase re-emits auth events (token refresh, SIGNED_IN) whenever the tab
   // regains focus. Only a different user should reload the profile; otherwise
@@ -77,22 +76,9 @@ export default function Admin() {
     if (error) setError(error.message)
   }
 
-  async function handleSignUp(e) {
-    e.preventDefault()
-    setError('')
-    setInfo('')
-    const { data, error } = await supabase.auth.signUp({ email, password })
-    if (error) { setError(error.message); return }
-    setInfo(
-      data.session
-        ? 'Account created — ask your developer to grant admin access, then sign in.'
-        : 'Account created — confirm your email, then ask your developer to grant admin access.'
-    )
-    setMode('signin')
-  }
-
+  // Stays on /admin (no navigate), which shows the admin sign-in form again.
   async function handleLogout() {
-    await supabase.auth.signOut()
+    await signOutThisDevice()
   }
 
   if (checking || profileLoading) return null
@@ -101,10 +87,8 @@ export default function Admin() {
     return (
       <section className="mx-auto max-w-sm px-6 py-24">
         <p className="font-mono text-xs uppercase tracking-widest text-seal">Admin</p>
-        <h1 className="mt-3 font-display text-3xl font-bold text-ink">
-          {mode === 'signin' ? 'Sign in' : 'Create your admin account'}
-        </h1>
-        <form onSubmit={mode === 'signin' ? handleSignIn : handleSignUp} className="mt-8 space-y-4">
+        <h1 className="mt-3 font-display text-3xl font-bold text-ink">Sign in</h1>
+        <form onSubmit={handleSignIn} className="mt-8 space-y-4">
           <input
             required type="email" placeholder="Email" value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -116,17 +100,16 @@ export default function Admin() {
             className="w-full rounded-xl border border-hairline bg-white px-4 py-3 text-ink placeholder:text-muted focus:border-seal outline-none"
           />
           {error && <p className="text-sm text-marigold-deep">{error}</p>}
-          {info && <p className="text-sm text-ink">{info}</p>}
           <button type="submit" className="w-full rounded-full bg-seal py-3 font-body text-sm font-semibold text-surface hover:bg-seal-deep">
-            {mode === 'signin' ? 'Sign in' : 'Create account'}
+            Sign in
           </button>
         </form>
-        <button
-          onClick={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setError(''); setInfo('') }}
-          className="mt-6 font-mono text-xs text-muted hover:text-seal"
-        >
-          {mode === 'signin' ? 'First time here? Create your admin account →' : '← Back to sign in'}
-        </button>
+        {/* No sign-up here: admin rights are granted by a developer (profiles.role = 'admin')
+            to an existing Trustall account. Google accounts sign in on the main page. */}
+        <p className="mt-6 text-xs leading-5 text-muted">
+          Admin access is added to an existing Trustall account by the Trustall team.{' '}
+          <Link to="/auth?redirectTo=%2Fadmin" className="font-mono text-seal hover:text-seal-deep">Use Google? Log in here →</Link>
+        </p>
       </section>
     )
   }

@@ -1,10 +1,14 @@
 import { createContext, useContext, useMemo } from 'react'
-import { useProfile } from './useProfile.js'
+import { ProfileContext, SessionContext, useAuthStateSource } from './useProfile.js'
 
 const RoleContext = createContext(null)
 
+// Owns the app's only auth subscription and profile load (useAuthStateSource)
+// and shares them: useSession() and useProfile() read the two inner contexts,
+// useRole() reads the role derived here.
 export function RoleProvider({ children }) {
-  const { session, profile, loading, error } = useProfile()
+  const { sessionValue, profileValue } = useAuthStateSource()
+  const { session, profile, loading, error } = profileValue
 
   const roleData = useMemo(() => {
     if (!session) {
@@ -43,9 +47,13 @@ export function RoleProvider({ children }) {
   }, [loading, session, profile, error])
 
   return (
-    <RoleContext.Provider value={roleData}>
-      {children}
-    </RoleContext.Provider>
+    <SessionContext.Provider value={sessionValue}>
+      <ProfileContext.Provider value={profileValue}>
+        <RoleContext.Provider value={roleData}>
+          {children}
+        </RoleContext.Provider>
+      </ProfileContext.Provider>
+    </SessionContext.Provider>
   )
 }
 

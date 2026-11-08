@@ -18,3 +18,10 @@ export function safeFileName(name, fallback = 'file') {
     .slice(-100)
   return cleaned || fallback
 }
+
+// Same rule as the database's profile_contacts_phone_format check (0032), so
+// the form can say what's wrong before saving: optional +, then 7-20 digits,
+// spaces, brackets or dashes.
+export function isValidPhone(value) {
+  return /^\+?[0-9 ()-]{7,20}$/.test(String(value ?? '').trim())
+}

@@ -51,6 +51,9 @@ const MARKERS = {
   '0035': ['function', 'consume_rate_limit'],
   '0036': ['policy_with_check', 'Users update own avatars'],
   '0037': ['function', 'chat_contact_violation'],
+  '0038': ['function', 'complete_profile_setup'],
+  '0039': ['policy', 'Users delete own device tokens'],
+  '0040': ['function', 'get_my_payment_readiness'],
 }
 // Migrations with nothing unique to check. They are safe to run again, so on a
 // database without history they simply run.

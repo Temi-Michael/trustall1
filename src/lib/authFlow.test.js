@@ -2,10 +2,14 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildAuthCallbackUrl,
+  buildGoogleOAuthOptions,
   clearAuthIntent,
   getAuthIntent,
   getEmailSignupOutcome,
+  needsProfileSetup,
+  readEmailLinkParams,
   safeRedirectPath,
+  safeReferralCode,
   saveAuthIntent,
   shouldCompleteGoogleSignup,
 } from './authFlow.js'
@@ -66,12 +70,14 @@ test('OAuth intent survives a callback that drops query parameters', () => {
   assert.deepEqual(getAuthIntent(new URLSearchParams(), storage), {
     flow: 'signup',
     redirectTo: '/listing/phone?promotion=featured',
+    refCode: null,
   })
 
   clearAuthIntent(storage)
   assert.deepEqual(getAuthIntent(new URLSearchParams(), storage), {
     flow: 'signin',
     redirectTo: '/',
+    refCode: null,
   })
 })
 
@@ -82,6 +88,7 @@ test('callback URL intent takes precedence over stored OAuth intent', () => {
   assert.deepEqual(getAuthIntent(new URLSearchParams('authFlow=signin&redirectTo=%2Forders'), storage), {
     flow: 'signin',
     redirectTo: '/orders',
+    refCode: null,
   })
 })
 
@@ -99,4 +106,75 @@ test('Google registration completion is limited to explicit signup callbacks wit
   assert.equal(shouldCompleteGoogleSignup('signup', session), true)
   assert.equal(shouldCompleteGoogleSignup('signin', session), false)
   assert.equal(shouldCompleteGoogleSignup('signup', null), false)
+})
+
+test('Google sign-in always asks which account to use', () => {
+  const options = buildGoogleOAuthOptions('https://trustall.online', '/orders', 'signup')
+  assert.deepEqual(options.queryParams, { prompt: 'select_account' })
+  assert.equal(options.redirectTo, buildAuthCallbackUrl('https://trustall.online', '/orders', 'signup'))
+})
+
+test('referral codes survive the Google redirect and are cleared with the intent', () => {
+  const storage = createMemoryStorage()
+  saveAuthIntent(storage, 'signup', '/', 'a1b2c3d4')
+  assert.equal(getAuthIntent(new URLSearchParams(), storage).refCode, 'a1b2c3d4')
+  assert.equal(getAuthIntent(new URLSearchParams('ref=fromurl'), storage).refCode, 'fromurl')
+
+  saveAuthIntent(storage, 'signup', '/')
+  assert.equal(getAuthIntent(new URLSearchParams(), storage).refCode, null, 'a new attempt without a code drops the old one')
+
+  saveAuthIntent(storage, 'signup', '/', 'a1b2c3d4')
+  clearAuthIntent(storage)
+  assert.equal(getAuthIntent(new URLSearchParams(), storage).refCode, null)
+})
+
+test('only plain referral tokens are accepted', () => {
+  assert.equal(safeReferralCode(' a1b2c3d4 '), 'a1b2c3d4')
+  for (const bad of ['', 'has space', '<script>', 'a'.repeat(65), null, undefined, 42]) {
+    assert.equal(safeReferralCode(bad), null, `expected ${JSON.stringify(bad)} to be rejected`)
+  }
+})
+
+test('profile setup follows the profile flag, with the old rule as fallback', () => {
+  const session = { user: { id: 'user-1' } }
+  // Migration 0038 applied: the flag decides, whichever button was used.
+  assert.equal(needsProfileSetup('signin', session, { setup_completed_at: null }), true)
+  assert.equal(needsProfileSetup('signup', session, { setup_completed_at: '2026-11-08T00:00:00Z' }), false)
+  // Without 0038 (no column) or no profile yet: only after "Sign up with Google".
+  assert.equal(needsProfileSetup('signup', session, { full_name: 'Ada' }), true)
+  assert.equal(needsProfileSetup('signin', session, { full_name: 'Ada' }), false)
+  assert.equal(needsProfileSetup('signup', session, null), true)
+  assert.equal(needsProfileSetup('signup', null, { setup_completed_at: null }), false)
+})
+
+test('email links with a token hash are read and stripped from the address', () => {
+  const link = readEmailLinkParams('https://trustall.online/reset-password?token_hash=abc123&type=recovery')
+  assert.equal(link.kind, 'token_hash')
+  assert.equal(link.tokenHash, 'abc123')
+  assert.equal(link.type, 'recovery')
+  assert.equal(link.cleanUrl, 'https://trustall.online/reset-password')
+
+  const confirm = readEmailLinkParams('https://trustall.online/auth?redirectTo=%2Forders&token_hash=xyz&type=email')
+  assert.equal(confirm.cleanUrl, 'https://trustall.online/auth?redirectTo=%2Forders', 'other query parameters are kept')
+})
+
+test('email links sent before the PKCE switch still sign in', () => {
+  const link = readEmailLinkParams('https://trustall.online/reset-password#access_token=a&refresh_token=r&type=recovery')
+  assert.deepEqual(
+    { kind: link.kind, accessToken: link.accessToken, refreshToken: link.refreshToken, type: link.type },
+    { kind: 'session_tokens', accessToken: 'a', refreshToken: 'r', type: 'recovery' },
+  )
+  assert.equal(link.cleanUrl, 'https://trustall.online/reset-password')
+})
+
+test('addresses that are not email links are ignored', () => {
+  for (const href of [
+    'https://trustall.online/auth?code=pkce-code',
+    'https://trustall.online/auth?token_hash=abc&type=unknown',
+    'https://trustall.online/#access_token=a&refresh_token=r',
+    'https://trustall.online/listing/phone',
+    'not a url',
+  ]) {
+    assert.equal(readEmailLinkParams(href), null, `expected ${href} to be ignored`)
+  }
 })

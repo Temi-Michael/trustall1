@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { Eye, EyeOff } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient.js'
 import { useProfile } from '../lib/useProfile.js'
-import { buildAuthCallbackUrl, clearAuthIntent, getAuthIntent, getEmailSignupOutcome, safeRedirectPath, saveAuthIntent, shouldCompleteGoogleSignup } from '../lib/authFlow.js'
+import { buildAuthCallbackUrl, buildGoogleOAuthOptions, clearAuthIntent, getAuthIntent, getEmailSignupOutcome, needsProfileSetup, safeRedirectPath, saveAuthIntent } from '../lib/authFlow.js'
+import { isProfileRpcUnavailable } from '../lib/profileFields.js'
+import { saveProfileSetup, withProfileSetupApplied } from '../lib/profileSetup.js'
 import { safeFileName } from '../lib/inputSafety.js'
 
 async function uploadAvatar(file, userId) {
@@ -23,7 +25,9 @@ async function uploadAvatar(file, userId) {
 }
 
 export default function Auth() {
-  const [mode, setMode] = useState('signin')
+  const [searchParams] = useSearchParams()
+  // Invite links (/auth?ref=…) are for new people, so they open on sign-up.
+  const [mode, setMode] = useState(() => (searchParams.get('ref') ? 'signup' : 'signin'))
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -34,12 +38,12 @@ export default function Auth() {
   const [busy, setBusy] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
-  const [searchParams] = useSearchParams()
-  const { session, profile, loading } = useProfile()
+  const { session, profile, setProfile, loading } = useProfile()
   const intent = getAuthIntent(searchParams, typeof window !== 'undefined' ? window.sessionStorage : null)
   const redirectTo = safeRedirectPath(location.state?.redirectTo || intent.redirectTo)
-  const refCode = searchParams.get('ref')
-  const isGoogleSignupCompletion = shouldCompleteGoogleSignup(intent.flow, session)
+  // From the invite link, or kept in sessionStorage across the Google redirect.
+  const refCode = intent.refCode
+  const isGoogleSignupCompletion = needsProfileSetup(intent.flow, session, profile)
 
   useEffect(() => {
     if (!loading && session?.user?.id && !isGoogleSignupCompletion) {
@@ -47,6 +51,17 @@ export default function Auth() {
       navigate(redirectTo, { replace: true })
     }
   }, [loading, session?.user?.id, isGoogleSignupCompletion, redirectTo, navigate])
+
+  // Record the invite as soon as a new Google user is back, so it isn't lost
+  // if they close the tab before finishing setup (claim_referral, 0040).
+  const referralClaimedRef = useRef(false)
+  useEffect(() => {
+    if (!isGoogleSignupCompletion || loading || !refCode || referralClaimedRef.current) return
+    referralClaimedRef.current = true
+    supabase.rpc('claim_referral', { p_ref_code: refCode }).then(({ error: claimError }) => {
+      if (claimError && !isProfileRpcUnavailable(claimError)) console.warn('Could not record the referral yet:', claimError)
+    })
+  }, [isGoogleSignupCompletion, loading, refCode])
 
   useEffect(() => {
     if (!isGoogleSignupCompletion || loading) return
@@ -74,12 +89,10 @@ export default function Auth() {
   async function handleGoogleSignIn() {
     setError('')
     setBusy(true)
-    saveAuthIntent(window.sessionStorage, mode, redirectTo)
+    saveAuthIntent(window.sessionStorage, mode, redirectTo, refCode)
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: {
-        redirectTo: buildAuthCallbackUrl(window.location.origin, redirectTo, mode),
-      },
+      options: buildGoogleOAuthOptions(window.location.origin, redirectTo, mode),
     })
     if (error) {
       clearAuthIntent(window.sessionStorage)
@@ -160,19 +173,13 @@ export default function Auth() {
     setBusy(true)
     setError('')
     try {
-      const updates = { full_name: name }
-      if (avatarFile) {
-        updates.avatar_url = await uploadAvatar(avatarFile, session.user.id)
-      }
+      const avatarUrl = avatarFile ? await uploadAvatar(avatarFile, session.user.id) : null
+      const updates = await saveProfileSetup(supabase, { userId: session.user.id, fullName: name, avatarUrl, refCode })
 
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update(updates)
-        .eq('id', session.user.id)
-        .select('id')
-        .single()
+      // Update the shared profile now so the navbar shows the new name and
+      // photo, and coming back to /auth doesn't ask for setup again.
+      setProfile((current) => withProfileSetupApplied(current, updates))
 
-      if (profileError) throw profileError
       clearAuthIntent(window.sessionStorage)
       navigate(redirectTo, { replace: true })
     } catch (completionError) {

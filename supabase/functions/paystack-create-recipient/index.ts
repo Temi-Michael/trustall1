@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { TOO_MANY_REQUESTS, withinRateLimit } from "../_shared/rateLimit.ts";
 import { corsHeadersFor, rejectOtherOrigins } from "../_shared/cors.js";
+import { missingPaymentRequirements, VERIFICATION_REQUIRED_MESSAGE } from "../_shared/paymentReadiness.ts";
 
 Deno.serve(async (request) => {
   // Per request: the allowed origin depends on who is calling.
@@ -32,6 +33,10 @@ Deno.serve(async (request) => {
     });
     const { data: { user }, error: authError } = await userClient.auth.getUser();
     if (authError || !user) return jsonResponse({ error: "Your session has expired. Please sign in again." }, 401);
+
+    // Only verified accounts may choose where money is paid out (migration 0040).
+    const missing = await missingPaymentRequirements(userClient);
+    if (missing?.length) return jsonResponse({ error: VERIFICATION_REQUIRED_MESSAGE, missing }, 403);
 
     let requestBody: { bank_code?: unknown; account_number?: unknown };
     try {

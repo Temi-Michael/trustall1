@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
 import { useProfile } from '../lib/useProfile.js'
 import { supabase } from '../lib/supabaseClient.js'
+import { signOutThisDevice } from '../lib/signOut.js'
 import { getProfileInitials } from '../lib/profileDisplay.js'
 import { NotificationBell } from './NotificationBell.jsx'
 
@@ -60,16 +61,78 @@ function MobileNavIcon({ type, active }) {
   )
 }
 
+// Account menu entries, grouped by purpose so no two lead to the same place:
+//   header   - who is signed in, and the one link to their own public page
+//   Activity - things in progress: conversations, orders, saved items
+//   Selling  - seller-only tools (hidden for buyers)
+//   Account  - settings and extras
+// Add new entries to the group they belong to rather than as loose links.
+function buildAccountMenuSections(profile) {
+  const isSeller = isSellerProfile(profile)
+  const sections = [
+    {
+      title: 'Activity',
+      links: [
+        { to: '/messages', label: 'Messages' },
+        { to: '/orders', label: 'Orders' },
+        { to: '/saved', label: 'Saved listings' },
+      ],
+    },
+  ]
+
+  if (isSeller) {
+    sections.push({
+      title: 'Selling',
+      links: [
+        { to: '/sell', label: 'Seller workspace' },
+        ...(profile?.verified_seller ? [{ to: '/marketing', label: 'Marketing' }] : []),
+      ],
+    })
+  }
+
+  sections.push({
+    title: 'Account',
+    links: [
+      { to: '/account/verification', label: 'Verification' },
+      { to: '/account/security', label: 'Sign-in & security' },
+      { to: '/refer', label: 'Refer a friend' },
+    ],
+  })
+
+  return sections
+}
+
+// Sellers' public page is their storefront; buyers' is /account. Linking
+// sellers straight there skips the redirect /account would do.
+function getOwnProfileLink(profile) {
+  if (isSellerProfile(profile)) {
+    return { to: `/seller/${encodeURIComponent(profile.handle || profile.id)}`, label: 'View my storefront' }
+  }
+  return { to: '/account', label: 'View my profile' }
+}
+
+const MENU_LINK_CLASS = 'block rounded-lg px-3 py-2 text-sm text-ink hover:bg-surfacealt'
+
 function AccountMenu({ profile, user }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
+  const navigate = useNavigate()
   const isSellerAccount = isSellerProfile(profile)
+  const sections = buildAccountMenuSections(profile)
+  const ownProfileLink = getOwnProfileLink(profile)
+  const displayName = profile?.full_name || profile?.business_name || user.email
+  const close = () => setOpen(false)
 
   useEffect(() => {
     function onClick(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
     document.addEventListener('mousedown', onClick)
     return () => document.removeEventListener('mousedown', onClick)
   }, [])
+
+  function handleLogout() {
+    close()
+    signOutThisDevice({ navigate })
+  }
 
   return (
     <div className="relative" ref={ref}>
@@ -87,25 +150,24 @@ function AccountMenu({ profile, user }) {
       </button>
       {open && (
         <div className="absolute right-0 mt-2 w-60 rounded-xl border border-hairline bg-white p-1.5 shadow-lg">
-          <p className="px-3 pb-1 pt-2 font-mono text-[9px] uppercase tracking-[0.2em] text-muted">Your account</p>
-          <Link to="/account" onClick={() => setOpen(false)} className="block rounded-lg px-3 py-2 text-sm text-ink hover:bg-surfacealt">{isSellerAccount ? 'My storefront' : 'My profile'}</Link>
-          <Link to="/messages" onClick={() => setOpen(false)} className="block rounded-lg px-3 py-2 text-sm text-ink hover:bg-surfacealt">Messages</Link>
-          <Link to="/orders" onClick={() => setOpen(false)} className="block rounded-lg px-3 py-2 text-sm text-ink hover:bg-surfacealt">Orders</Link>
-          <Link to="/saved" onClick={() => setOpen(false)} className="block rounded-lg px-3 py-2 text-sm text-ink hover:bg-surfacealt">Saved listings</Link>
-          <Link to="/refer" onClick={() => setOpen(false)} className="block rounded-lg px-3 py-2 text-sm text-ink hover:bg-surfacealt">Refer a friend</Link>
-          {isSellerAccount && (
-            <>
-              <div className="my-1 border-t border-hairline" />
-              <p className="px-3 pb-1 pt-2 font-mono text-[9px] uppercase tracking-[0.2em] text-muted">Seller tools</p>
-              <Link to="/sell" onClick={() => setOpen(false)} className="block rounded-lg px-3 py-2 text-sm text-ink hover:bg-surfacealt">Seller workspace</Link>
-            </>
-          )}
-          {profile?.verified_seller && (
-            <Link to="/marketing" onClick={() => setOpen(false)} className="block rounded-lg px-3 py-2 text-sm text-ink hover:bg-surfacealt">Marketing</Link>
-          )}
+          <div className="px-3 pb-2 pt-2">
+            <p className="truncate text-sm font-semibold text-ink">{displayName}</p>
+            <Link to={ownProfileLink.to} onClick={close} className="font-mono text-[11px] text-seal hover:text-seal-deep">
+              {ownProfileLink.label} →
+            </Link>
+          </div>
+          {sections.map((section) => (
+            <div key={section.title} className="border-t border-hairline pt-1 mt-1">
+              <p className="px-3 pb-1 pt-2 font-mono text-[9px] uppercase tracking-[0.2em] text-muted">{section.title}</p>
+              {section.links.map((link) => (
+                <Link key={link.to} to={link.to} onClick={close} className={MENU_LINK_CLASS}>{link.label}</Link>
+              ))}
+            </div>
+          ))}
           <div className="my-1 border-t border-hairline" />
           <button
-            onClick={() => { supabase.auth.signOut(); setOpen(false) }}
+            type="button"
+            onClick={handleLogout}
             className="block w-full rounded-lg px-3 py-2 text-left text-sm text-muted hover:bg-surfacealt"
           >
             Log out
