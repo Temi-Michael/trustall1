@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowRight, BarChart3, Check, CircleDollarSign, Eye, MousePo
 import { supabase } from '../lib/supabaseClient.js'
 import { useProfile } from '../lib/useProfile.js'
 import { PROMOTION_PLACEMENTS } from '../lib/promotions.js'
+import { usePaymentReadiness } from '../lib/usePaymentReadiness.js'
 
 const TARGET_TYPES = [
   { id: 'product', label: 'Product' },
@@ -65,6 +66,10 @@ export default function Marketing() {
   const [submitting, setSubmitting] = useState(false)
   const [feedback, setFeedback] = useState('')
   const [selectedAnalytics, setSelectedAnalytics] = useState(null)
+  // Paying for a promotion needs a verified account (migration 0040). The
+  // promotion server code only exists on Supabase (issue 6.6), so for now this
+  // check is in the app only.
+  const { readiness } = usePaymentReadiness({ enabled: Boolean(profile?.verified_seller) })
 
   useEffect(() => {
     if (!loading && !session) navigate('/auth', { state: { redirectTo: '/marketing' } })
@@ -130,6 +135,10 @@ export default function Marketing() {
 
   async function payForPromotion() {
     if (!selectedTarget || !selectedPackage || !placements.length) return
+    if (readiness?.checked && !readiness.ready) {
+      setFeedback('Verify your account before paying: open Verification in your account menu.')
+      return
+    }
     if (!window.PaystackPop) {
       setFeedback('Secure checkout is unavailable right now. Refresh the page and try again.')
       return

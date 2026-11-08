@@ -52,7 +52,8 @@ jobs:
       - name: Deploy signed-in functions
         run: |
           for fn in paystack-verify-payment paystack-prepare-checkout paystack-create-subaccount \
-                    paystack-create-recipient send-notification-email upload-proxy screen-chat-image; do
+                    paystack-create-recipient paystack-resolve-account send-notification-email \
+                    upload-proxy screen-chat-image; do
             echo "Deploying $fn"
             supabase functions deploy "$fn" --project-ref "$SUPABASE_PROJECT_ID" --yes
           done

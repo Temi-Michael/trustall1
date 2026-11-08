@@ -9,6 +9,8 @@ import { LoadingState, NotFound, DataError } from '../components/ErrorBoundary.j
 import { loadSavedListingIds, saveListing, unsaveListing } from '../lib/listingFeatures.js'
 import Seo from '../components/Seo.jsx'
 import { recordPromotionEvent } from '../lib/promotions.js'
+import { usePaymentReadiness } from '../lib/usePaymentReadiness.js'
+import { verificationPageLink } from '../lib/paymentReadiness.js'
 
 function listingImageUrl(value) {
   if (!value) return ''
@@ -98,6 +100,8 @@ export default function Listing() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const { session } = useSession()
+  // Signed-in visitors who couldn't pay yet see a hint under "Chat with seller".
+  const { readiness } = usePaymentReadiness({ enabled: Boolean(session) })
   const [listing, setListing] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -454,6 +458,12 @@ export default function Listing() {
           >
             {starting ? 'Starting chat…' : 'Chat with seller'}
           </button>
+          {readiness?.checked && !readiness.ready && (listing.seller_id || listing.seller?.id) !== session?.user?.id && (
+            <p className="mt-3 text-center text-xs text-muted">
+              You'll need a verified account to pay.{' '}
+              <Link to={verificationPageLink(`/listing/${slug}`)} className="font-semibold text-seal hover:text-seal-deep">Verify now →</Link>
+            </p>
+          )}
         </div>
       </div>
     </section>

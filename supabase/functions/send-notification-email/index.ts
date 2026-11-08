@@ -2,19 +2,19 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { boundedText, escapeHtml } from "../_shared/validate.ts";
 import { TOO_MANY_REQUESTS, withinRateLimit } from "../_shared/rateLimit.ts";
+import { corsHeadersFor, rejectOtherOrigins } from "../_shared/cors.js";
 
 // Sends a notification email to the signed-in caller only. The recipient comes
 // from the verified session and the HTML is built here from escaped plain text,
 // so this cannot be used to email arbitrary addresses or arbitrary HTML.
 Deno.serve(async (req) => {
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  };
+  const corsHeaders = corsHeadersFor(req);
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+  const otherSite = rejectOtherOrigins(req, corsHeaders);
+  if (otherSite) return otherSite;
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
 
   try {

@@ -5,6 +5,29 @@ import { supabase } from "./supabaseClient";
 
 let tokenRefreshInterval = null;
 
+// The FCM token this browser last saved to device_tokens. Sign-out reads it to
+// delete exactly this device's row while the user is still allowed to.
+const PUSH_TOKEN_STORAGE_KEY = "trustall.push-token";
+
+// localStorage can be missing or throw (private mode, blocked site data); push
+// cleanup must never break because of that.
+function readStoredPushToken() {
+  try {
+    return window.localStorage.getItem(PUSH_TOKEN_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredPushToken(token) {
+  try {
+    if (token) window.localStorage.setItem(PUSH_TOKEN_STORAGE_KEY, token);
+    else window.localStorage.removeItem(PUSH_TOKEN_STORAGE_KEY);
+  } catch {
+    // Nothing to do: the token is only a cleanup hint.
+  }
+}
+
 async function getAppServiceWorkerRegistration() {
   if (!('serviceWorker' in navigator)) return null
 
@@ -107,6 +130,7 @@ async function retrieveAndStoreToken(userId, registration) {
       return false;
     }
 
+    writeStoredPushToken(token);
     console.log("FCM token stored successfully");
     return true;
   } catch (err) {
@@ -136,30 +160,47 @@ function setupTokenRefresh(userId, registration) {
 }
 
 /**
- * Clean up when user logs out
+ * Sign-out cleanup that needs the session, so it runs BEFORE signing out:
+ * deletes this device's device_tokens row (only its owner may), then does the
+ * local cleanup in unregisterPushToken. Never throws.
  */
-export async function unregisterPushToken(userId) {
+export async function removePushTokenBeforeSignOut() {
+  const token = readStoredPushToken();
+  if (token) {
+    try {
+      const { error } = await supabase.from("device_tokens").delete().eq("fcm_token", token);
+      if (error) console.warn("Could not remove this device from push notifications:", error);
+    } catch (err) {
+      console.warn("Could not remove this device from push notifications:", err);
+    }
+  }
+  await unregisterPushToken();
+}
+
+/**
+ * Local push cleanup: stops the refresh timer, clears the badge and cancels
+ * this browser's token with Firebase so the old account stops reaching it.
+ * Also used after sign-outs that happen elsewhere (session expiry, another
+ * tab, "sign out of other devices"), when the device_tokens row can no longer
+ * be deleted; send-push-notification removes such cancelled tokens itself.
+ */
+export async function unregisterPushToken() {
   try {
-    // Clear refresh interval
     if (tokenRefreshInterval) {
       clearInterval(tokenRefreshInterval);
       tokenRefreshInterval = null;
     }
 
-    // Clear the app badge when the user logs out.
     if ("clearAppBadge" in navigator) {
       navigator.clearAppBadge().catch(() => {});
     }
 
-    // Cancel this device's push token so the signed-out account stops reaching
-    // it. This runs after sign-out, so the device_tokens row can't be deleted
-    // here; send-push-notification removes tokens Firebase reports as invalid.
     // The app service worker stays registered: it also serves the offline page.
     if (messaging) {
       await deleteToken(messaging).catch((err) => console.warn("Could not cancel push token:", err));
     }
+    writeStoredPushToken(null);
   } catch (err) {
     console.error("Failed to unregister push token:", err);
   }
 }
-

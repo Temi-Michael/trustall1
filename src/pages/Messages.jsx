@@ -1,5 +1,5 @@
 ﻿import { useEffect, useRef, useState } from 'react'
-import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom'
+import { useParams, useNavigate, Link, useSearchParams, useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient.js'
 import { useProfile } from '../lib/useProfile.js'
 import { getProfileInitials } from '../lib/profileDisplay.js'
@@ -10,6 +10,8 @@ import { isOnline, formatLastSeen, subscribeToUserPresence } from '../lib/presen
 import { ensureNotificationPermission, sendBrowserNotification } from '../lib/notifications.js'
 import { markConversationNotificationsRead } from '../lib/notificationUtils.js'
 import { getSupportEmail } from '../lib/authRedirect.js'
+import { usePaymentReadiness } from '../lib/usePaymentReadiness.js'
+import { describePaymentRequirement, isPaymentVerificationError, verificationPageLink } from '../lib/paymentReadiness.js'
 import { Paperclip, Send } from 'lucide-react'
 
 export default function Messages() {
@@ -1070,6 +1072,11 @@ function OfferCard({ offer, isSeller, userId, buyerEmail, sellerPayoutConnected 
   const buyerFee = 100 // flat escrow protection fee
   const totalCharged = itemTotal + buyerFee
   const hasConnectedPayout = sellerPayoutConnected
+  // Paying needs a verified account (migration 0040). The database refuses
+  // unverified checkouts; this shows the checklist instead of a failing button.
+  const location = useLocation()
+  const { readiness, refresh: refreshReadiness } = usePaymentReadiness({ enabled: !isSeller && offer.status === 'pending' })
+  const needsVerification = Boolean(readiness?.checked && !readiness.ready)
 
   async function shareDeliveryAddress() {
     const cleanAddress = deliveryAddress.trim()
@@ -1129,6 +1136,12 @@ function OfferCard({ offer, isSeller, userId, buyerEmail, sellerPayoutConnected 
     setPaying(true)
     // References are issued server-side (e.g. TRUST-ORD-YBENA62B67JS) and can only be used once.
     const { data: reference, error: referenceError } = await supabase.rpc('issue_order_payment_reference', { p_offer_id: offer.id })
+    if (isPaymentVerificationError(referenceError)) {
+      // Readiness changed since the page loaded: show the checklist instead.
+      setPaying(false)
+      await refreshReadiness()
+      return
+    }
     if (referenceError || !reference) {
       setPaying(false)
       alert(referenceError?.message || "Couldn't start checkout. Please try again.")
@@ -1288,13 +1301,28 @@ function OfferCard({ offer, isSeller, userId, buyerEmail, sellerPayoutConnected 
           <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
             🔒 Safe Pay: Your ₦{totalCharged.toLocaleString()} will be held in escrow. The seller only gets paid after you receive your item and approve it.
           </div>
-          <button
-            onClick={acceptAndPay}
-            disabled={paying}
-            className="mt-4 w-full rounded-lg bg-gradient-to-r from-seal to-seal-deep py-3 font-body text-sm font-semibold text-surface hover:shadow-lg hover:shadow-seal/20 disabled:opacity-60 disabled:cursor-not-allowed transition transform hover:-translate-y-0.5"
-          >
-            {paying ? 'Processing…' : `Accept & Pay ₦${totalCharged.toLocaleString()}`}
-          </button>
+          {needsVerification ? (
+            <div role="status" className="mt-4 rounded-xl border border-marigold/40 bg-marigold/10 p-3">
+              <p className="text-sm font-semibold text-ink">Verify your account to pay</p>
+              <ul className="mt-1 list-disc pl-5 text-xs text-muted">
+                {readiness.missing.map((code) => <li key={code}>{describePaymentRequirement(code)}</li>)}
+              </ul>
+              <Link
+                to={verificationPageLink(location.pathname)}
+                className="mt-3 inline-flex rounded-full bg-seal px-4 py-2 font-mono text-xs font-semibold text-white hover:bg-seal-deep"
+              >
+                Verify now
+              </Link>
+            </div>
+          ) : (
+            <button
+              onClick={acceptAndPay}
+              disabled={paying}
+              className="mt-4 w-full rounded-lg bg-gradient-to-r from-seal to-seal-deep py-3 font-body text-sm font-semibold text-surface hover:shadow-lg hover:shadow-seal/20 disabled:opacity-60 disabled:cursor-not-allowed transition transform hover:-translate-y-0.5"
+            >
+              {paying ? 'Processing…' : `Accept & Pay ₦${totalCharged.toLocaleString()}`}
+            </button>
+          )}
         </>
       )}
       {offer.status !== 'pending' && (

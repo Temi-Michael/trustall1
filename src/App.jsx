@@ -4,6 +4,7 @@ import { Analytics } from '@vercel/analytics/react'
 import { SpeedInsights } from '@vercel/speed-insights/react'
 import Navbar, { MobileBottomNav } from './components/Navbar.jsx'
 import Footer from './components/Footer.jsx'
+import { ProfileSetupBanner } from './components/ProfileSetupBanner.jsx'
 import TrustallChat from './components/TrustallChat.jsx'
 import { ErrorBoundary, NotFound } from './components/ErrorBoundary.jsx'
 import { RoleProvider } from './lib/RoleContext.jsx'
@@ -11,6 +12,7 @@ import { useProfile } from './lib/useProfile.js'
 import { messaging, onMessage } from './lib/firebaseConfig.js'
 import { registerPushToken, unregisterPushToken } from './lib/useRegisterPush.js'
 import { startPresenceTracking, stopPresenceTracking } from './lib/presenceUtils.js'
+import { LAST_USER_ID_STORAGE_KEY } from './lib/signOut.js'
 
 const Home = lazy(() => import('./pages/Home.jsx'))
 const Admin = lazy(() => import('./pages/Admin.jsx'))
@@ -30,6 +32,8 @@ const Messages = lazy(() => import('./pages/Messages.jsx'))
 const Marketing = lazy(() => import('./pages/Marketing.jsx'))
 const Refer = lazy(() => import('./pages/Refer.jsx'))
 const Account = lazy(() => import('./pages/Account.jsx'))
+const AccountSecurity = lazy(() => import('./pages/AccountSecurity.jsx'))
+const AccountVerification = lazy(() => import('./pages/AccountVerification.jsx'))
 const HowItWorks = lazy(() => import('./pages/HowItWorks.jsx'))
 const SavedListings = lazy(() => import('./pages/SavedListings.jsx'))
 const Orders = lazy(() => import('./pages/Orders.jsx').then((module) => ({ default: module.default })))
@@ -80,25 +84,23 @@ function GlobalSetup() {
     }
   }, [session?.user?.id])
 
-  // Cleanup when user logs out
+  // Fallback cleanup for sessions that ended without signOutThisDevice
+  // (expiry, another tab, "sign out of other devices" on another device).
+  // signOutThisDevice does the full cleanup itself and clears the key first.
   useEffect(() => {
     if (loading) return // Auth check is still in progress; do not treat this as logout.
     if (session?.user?.id) return // User is logged in, don't cleanup
 
-    // User logged out, unregister push notifications
-    const previousUserId = localStorage.getItem('lastUserId')
-    if (previousUserId) {
-      unregisterPushToken(previousUserId).catch(err => {
-        console.log('Failed to unregister push token:', err)
-      })
-      localStorage.removeItem('lastUserId')
+    if (localStorage.getItem(LAST_USER_ID_STORAGE_KEY)) {
+      unregisterPushToken()
+      localStorage.removeItem(LAST_USER_ID_STORAGE_KEY)
     }
   }, [session, loading])
 
-  // Store current user ID for cleanup
+  // Remember who is signed in so the fallback above knows a session ended.
   useEffect(() => {
     if (session?.user?.id) {
-      localStorage.setItem('lastUserId', session.user.id)
+      localStorage.setItem(LAST_USER_ID_STORAGE_KEY, session.user.id)
     }
   }, [session?.user?.id])
 
@@ -120,6 +122,7 @@ export default function App() {
         <GlobalSetup />
         <div className="app-shell flex min-h-screen flex-col bg-surface">
           {!isAdminRoute && <Navbar />}
+          {!isAdminRoute && <ProfileSetupBanner />}
           <main className={isAdminRoute ? 'flex-1' : 'flex-1 pb-24 md:pb-0'}>
             <ScrollToTop />
             <Suspense fallback={<div className="flex min-h-[40vh] items-center justify-center text-sm text-muted">Loading…</div>}>
@@ -143,6 +146,8 @@ export default function App() {
                 <Route path="/marketing" element={<Marketing />} />
                 <Route path="/refer" element={<Refer />} />
                 <Route path="/account" element={<Account />} />
+                <Route path="/account/security" element={<AccountSecurity />} />
+                <Route path="/account/verification" element={<AccountVerification />} />
                 <Route path="/how-it-works" element={<HowItWorks />} />
                 <Route path="/saved" element={<SavedListings />} />
                 <Route path="/orders" element={<Orders />} />

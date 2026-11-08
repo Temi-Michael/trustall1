@@ -9,6 +9,9 @@ import ServiceGigWizard from '../components/ServiceGigWizard.jsx'
 import { NIGERIAN_BANKS } from '../lib/nigerianBanks.js'
 import { safeFileName } from '../lib/inputSafety.js'
 import { PUBLIC_PROFILE_COLUMNS } from '../lib/profileFields.js'
+import { usePaymentReadiness } from '../lib/usePaymentReadiness.js'
+import { describePaymentRequirement, verificationPageLink } from '../lib/paymentReadiness.js'
+import { isCompleteAccountNumber, namesLookRelated, normalizeAccountNumber } from '../lib/payoutAccount.js'
 import { useBalanceVisibility } from '../lib/useBalanceVisibility.js'
 import { formatBalance } from '../lib/balanceDisplay.js'
 import BalanceToggle from '../components/BalanceToggle.jsx'
@@ -130,7 +133,7 @@ export default function Sell() {
       <SellerOrderManager session={session} />
       <ProfileSetup profile={profile} setProfile={setProfile} session={session} />
       <VerificationBlock profile={profile} session={session} />
-      <PayoutBlock profile={profile} setProfile={setProfile} session={session} />
+      <PayoutBlock profile={profile} setProfile={setProfile} />
       <ListingsBlock profile={profile} session={session} />
     </section>
   )
@@ -523,49 +526,92 @@ function VerificationBlock({ profile, session }) {
   )
 }
 
-function PayoutBlock({ profile, setProfile, session }) {
+// POSTs to a Trustall server function as the signed-in user.
+// Returns { ok, status, body }; body is {} when the reply isn't JSON.
+async function postToServerFunction(name, payload) {
+  const { data: { session: activeSession } } = await supabase.auth.getSession()
+  if (!activeSession?.access_token) throw new Error('Please sign in again before connecting your payout account.')
+  const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${name}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${activeSession.access_token}` },
+    body: JSON.stringify(payload),
+  })
+  return { ok: res.ok, status: res.status, body: await res.json().catch(() => ({})) }
+}
+
+// Wait this long after the last keystroke before looking the account up.
+const ACCOUNT_LOOKUP_DELAY_MS = 400
+
+function PayoutBlock({ profile, setProfile }) {
   const [bankCode, setBankCode] = useState('')
   const [accountNumber, setAccountNumber] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  // The bank's name for the account, shown before connecting so a wrong digit
+  // or bank is caught: idle -> checking -> found | failed.
+  const [lookup, setLookup] = useState({ status: 'idle', accountName: '', error: '' })
+  const [confirmedOwner, setConfirmedOwner] = useState(false)
   const isLegacySeller = profile?.is_seller && !profile?.paystack_recipient_code
+  // Connecting a payout account needs a verified account (migration 0040);
+  // the payout functions enforce it, this shows what's missing first.
+  const { readiness } = usePaymentReadiness({ enabled: !profile?.paystack_recipient_code })
+  const needsVerification = Boolean(readiness?.checked && !readiness.ready)
+  const accountComplete = isCompleteAccountNumber(accountNumber)
+
+  // Look the account up once a bank is chosen and all 10 digits are in. Any
+  // change starts over, and the seller must confirm the new name again.
+  useEffect(() => {
+    setConfirmedOwner(false)
+    if (!bankCode || !accountComplete || needsVerification) {
+      setLookup({ status: 'idle', accountName: '', error: '' })
+      return undefined
+    }
+
+    let current = true
+    setLookup({ status: 'checking', accountName: '', error: '' })
+    const timer = setTimeout(async () => {
+      try {
+        const { ok, body } = await postToServerFunction('paystack-resolve-account', { bank_code: bankCode, account_number: accountNumber })
+        if (!current) return
+        if (ok && body.account_name) setLookup({ status: 'found', accountName: body.account_name, error: '' })
+        else setLookup({ status: 'failed', accountName: '', error: body.error || "We couldn't check this account. Please try again." })
+      } catch (lookupError) {
+        if (current) setLookup({ status: 'failed', accountName: '', error: lookupError.message || "We couldn't check this account. Please try again." })
+      }
+    }, ACCOUNT_LOOKUP_DELAY_MS)
+
+    return () => {
+      current = false
+      clearTimeout(timer)
+    }
+  }, [bankCode, accountNumber, accountComplete, needsVerification])
 
   if (profile.paystack_recipient_code) {
     return (
       <div className="seller-panel mt-6 border-seal/30 bg-seal/5 p-6">
         <p className="font-mono text-[10px] uppercase tracking-[0.26em] text-seal">Payout</p>
         <h2 className="mt-1 font-display text-lg text-ink">Payout account</h2>
-        <p className="mt-2 text-sm text-seal">✓ Connected — Paystack routes your share automatically at checkout.</p>
+        <p className="mt-2 text-sm text-seal">✓ Connected. Your share of each sale is paid to this account after the buyer confirms delivery.</p>
       </div>
     )
   }
 
+  const nameMismatch = lookup.status === 'found' && !namesLookRelated(lookup.accountName, profile.full_name, profile.business_name)
+  const canConnect = lookup.status === 'found' && confirmedOwner && !needsVerification && !submitting
+
   async function connect(e) {
     e.preventDefault()
+    if (!canConnect) return
     setSubmitting(true)
     setError('')
     try {
-      const { data: { session: activeSession } } = await supabase.auth.getSession()
-      if (!activeSession?.access_token) throw new Error('Please sign in again before connecting your payout account.')
-
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/paystack-create-subaccount`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${activeSession.access_token}` },
-          body: JSON.stringify({ bank_code: bankCode, account_number: accountNumber }),
-        }
-      )
-      const result = await res.json().catch(() => ({}))
-      if (!res.ok || !result.success || !result.recipient_code) {
-        const message = result.error || `The payout setup could not be completed (HTTP ${res.status}).`
-        const diagnostic = typeof result.diagnostic === 'string'
-          ? result.diagnostic
-          : result.diagnostic ? JSON.stringify(result.diagnostic) : ''
-        throw new Error([message, diagnostic].filter(Boolean).join(' '))
+      // Payouts are Paystack transfers to this recipient (paystack-process-payout);
+      // the recipient code is what marks the account as connected (payout_connected).
+      const { ok, status, body } = await postToServerFunction('paystack-create-recipient', { bank_code: bankCode, account_number: accountNumber })
+      if (!ok || !body.success || !body.recipient_code) {
+        throw new Error(body.error || `The payout setup could not be completed (HTTP ${status}).`)
       }
-
-      setProfile((currentProfile) => ({ ...currentProfile, paystack_recipient_code: result.recipient_code }))
+      setProfile((currentProfile) => ({ ...currentProfile, paystack_recipient_code: body.recipient_code }))
     } catch (connectError) {
       setError(connectError.message || 'The payout setup could not be completed right now.')
     } finally {
@@ -588,9 +634,18 @@ function PayoutBlock({ profile, setProfile, session }) {
       <p className="font-mono text-[10px] uppercase tracking-[0.26em] text-seal">Payout</p>
       <h2 className="mt-1 font-display text-lg text-ink">Connect your payout account</h2>
       <p className="mt-1 text-sm text-muted">
-        Paystack automatically splits every sale at checkout — your share (5% fee, capped at
-        ₦5,000) settles to this account on Paystack's standard schedule.
+        Your share of each sale (after Trustall's 5% fee, capped at ₦5,000) is paid to this
+        account once the buyer confirms delivery.
       </p>
+      {needsVerification && (
+        <div role="status" className="mt-4 rounded-xl border border-marigold/40 bg-marigold/10 p-3 text-sm text-ink">
+          <p className="font-semibold">Verify your account to connect a payout account</p>
+          <ul className="mt-1 list-disc pl-5 text-xs text-muted">
+            {readiness.missing.map((code) => <li key={code}>{describePaymentRequirement(code)}</li>)}
+          </ul>
+          <Link to={verificationPageLink('/sell')} className="mt-2 inline-block text-xs font-semibold text-seal hover:text-seal-deep">Verify now →</Link>
+        </div>
+      )}
       <form onSubmit={connect} className="mt-5 grid gap-4 sm:grid-cols-2">
         <select
           required value={bankCode} onChange={(e) => setBankCode(e.target.value)}
@@ -600,13 +655,38 @@ function PayoutBlock({ profile, setProfile, session }) {
           {NIGERIAN_BANKS.map((bank) => <option key={bank.code} value={bank.code}>{bank.name}</option>)}
         </select>
         <input
-          required placeholder="Account number" value={accountNumber}
-          onChange={(e) => setAccountNumber(e.target.value)}
+          required placeholder="10-digit account number" value={accountNumber}
+          inputMode="numeric" autoComplete="off" maxLength={10}
+          onChange={(e) => setAccountNumber(normalizeAccountNumber(e.target.value))}
           className="rounded-xl border border-hairline bg-surfacealt px-4 py-3 text-sm text-ink placeholder:text-muted focus:border-seal outline-none"
         />
+        <div aria-live="polite" className="sm:col-span-2">
+          {lookup.status === 'checking' && <p className="text-sm text-muted">Checking the account name…</p>}
+          {lookup.status === 'failed' && <p role="alert" className="text-sm text-marigold-deep">{lookup.error}</p>}
+          {lookup.status === 'found' && (
+            <div className="rounded-xl border border-hairline bg-white p-4">
+              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted">Account name</p>
+              <p className="mt-1 text-base font-semibold text-ink">{lookup.accountName}</p>
+              {nameMismatch && (
+                <p className="mt-2 text-xs text-marigold-deep">
+                  This name doesn't match your profile. That's fine if it's your legal name; otherwise check the bank and account number.
+                </p>
+              )}
+              <label className="mt-3 flex items-start gap-2 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  checked={confirmedOwner}
+                  onChange={(e) => setConfirmedOwner(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 accent-seal"
+                />
+                Yes, this is my account. Pay my sales into it.
+              </label>
+            </div>
+          )}
+        </div>
         {error && <p className="text-sm text-marigold-deep sm:col-span-2">{error}</p>}
         <button
-          type="submit" disabled={submitting}
+          type="submit" disabled={!canConnect}
           className="rounded-full bg-ink px-6 py-2.5 font-body text-sm font-medium text-surface hover:bg-inksoft disabled:opacity-50 sm:col-span-2 sm:w-fit"
         >
           {submitting ? 'Connecting…' : 'Connect account'}

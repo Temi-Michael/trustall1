@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Eye, EyeOff } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient.js'
+import { completeEmailLinkSignIn } from '../lib/emailLinkSession.js'
 
 function PasswordInput({ label, value, onChange, visible, onToggle, autoComplete }) {
   return (
@@ -57,11 +58,13 @@ export default function ResetPassword() {
     })
 
     async function checkRecoverySession() {
+      // Reset links sign the user in first (emailLinkSession.js), which also
+      // removes the link's secrets from the address, so its type comes from there.
+      const emailLink = await completeEmailLinkSignIn()
       const { data, error: sessionError } = await supabase.auth.getSession()
       if (!mounted) return
 
-      const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''))
-      const isRecoveryHash = hashParams.get('type') === 'recovery'
+      const isRecoveryLink = emailLink.type === 'recovery'
 
       if (sessionError || (!data.session && !recoveryEventReceived)) {
         setError('This password reset link is invalid or has expired. Please request a new one.')
@@ -69,10 +72,16 @@ export default function ResetPassword() {
         return
       }
 
-      if (data.session && (isRecoveryHash || recoveryEventReceived)) {
+      if (isRecoveryLink || recoveryEventReceived) {
         setRecoveryReady(true)
-      } else if (!data.session) {
-        setError('This password reset link is invalid or has expired. Please request a new one.')
+      } else {
+        // A PKCE reset link (?code=, sent before the email template change)
+        // opened in the browser that asked for it: Supabase signs in during
+        // start-up and signals PASSWORD_RECOVERY just after, which the
+        // listener above handles. Give it a moment before showing the
+        // "invalid link" message.
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        if (!mounted || recoveryEventReceived) return
       }
       setCheckingLink(false)
     }
