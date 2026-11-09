@@ -7,9 +7,13 @@ import { SealMark } from '../components/Navbar.jsx'
 import Seo from '../components/Seo.jsx'
 import { recordPromotionEvent } from '../lib/promotions.js'
 
+// Home page category tiles. `label` is what visitors see; `category`, when
+// set, is the value sellers actually save (LISTING_CATEGORIES in
+// src/lib/listingCategories.js), so the tile's Browse link finds their
+// listings. Without it, the label itself is searched for.
 const categories = [
   { label: 'Phones & Gadgets', icon: Smartphone },
-  { label: 'Fashion & Style', icon: Shirt },
+  { label: 'Fashion & Style', category: 'Fashion', icon: Shirt },
   { label: 'Home & Living', icon: House },
   { label: 'Beauty & Personal Care', icon: Flower2 },
   { label: 'Sports & Outdoors', icon: Dumbbell },
@@ -245,8 +249,8 @@ export default function Home() {
 
       <section className="mx-auto max-w-6xl px-4 py-4 sm:px-6">
         <div className="grid grid-cols-4 gap-2 sm:grid-cols-4 sm:gap-3 md:grid-cols-8">
-          {categories.map(({ label, icon: Icon }) => (
-            <Link key={label} to={`/browse?category=${encodeURIComponent(label)}`} className="group flex min-h-[78px] min-w-0 flex-col items-center justify-center gap-2 rounded-lg border border-slate-100 bg-white px-1.5 py-3 text-center transition hover:border-emerald-200 hover:bg-emerald-50/60">
+          {categories.map(({ label, category, icon: Icon }) => (
+            <Link key={label} to={`/browse?category=${encodeURIComponent(category || label)}`} className="group flex min-h-[78px] min-w-0 flex-col items-center justify-center gap-2 rounded-lg border border-slate-100 bg-white px-1.5 py-3 text-center transition hover:border-emerald-200 hover:bg-emerald-50/60">
               <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-800 transition group-hover:bg-emerald-100"><Icon size={18} /></span><span className="line-clamp-2 text-[9px] font-semibold leading-tight text-slate-600 sm:text-[10px]">{label}</span>
             </Link>
           ))}

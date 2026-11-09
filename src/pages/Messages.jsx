@@ -411,52 +411,8 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
     shouldStickToMessageBottom.current = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 120
   }
 
-  const handleMessageEdit = async (messageId, newBody) => {
-    const trimmed = (newBody || '').trim()
-    const { data, error } = await supabase.rpc('edit_message', {
-      p_message_id: messageId,
-      p_new_body: trimmed,
-    })
-
-    if (error) throw error
-    if (!data?.success) {
-      throw new Error(data?.error || 'This message can no longer be edited.')
-    }
-
-    setItems((prev) => prev.map((item) => item.kind === 'message' && item.id === messageId
-      ? { ...item, body: trimmed, edited_at: item.edited_at || new Date().toISOString() }
-      : item))
-  }
-
-  const handleMessageDelete = async (messageId) => {
-    const { data, error } = await supabase.rpc('delete_message', {
-      p_message_id: messageId,
-    })
-
-    if (error) throw error
-    if (!data?.success) {
-      throw new Error(data?.error || 'This message could not be deleted.')
-    }
-
-    if (Array.isArray(data.storage_paths_to_remove) && data.storage_paths_to_remove.length > 0) {
-      const { error: removeError } = await supabase.storage
-        .from('message-attachments')
-        .remove(data.storage_paths_to_remove)
-
-      if (removeError) {
-        console.error('Failed to remove message attachments from storage:', removeError)
-      }
-    }
-
-    setItems((prev) => prev.map((item) => item.kind === 'message' && item.id === messageId
-      ? { ...item, body: '', is_deleted: true, deleted_at: item.deleted_at || new Date().toISOString() }
-      : item))
-    setAttachmentsByMessageId((prev) => {
-      const next = { ...prev }
-      delete next[messageId]
-      return next
-    })
-  }
+  // Messages can't be edited or deleted once sent (migration 0041), so the
+  // conversation stays a reliable record of what was agreed.
 
   async function loadThread() {
     const { data: convo, error: convoError } = await supabase
@@ -768,8 +724,6 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
               message={item}
               isMine={item.sender_id === userId}
               attachments={attachmentsByMessageId[item.id] || []}
-              onEdit={handleMessageEdit}
-              onDelete={handleMessageDelete}
             />
           )
         )}
@@ -870,35 +824,16 @@ function MediaLightbox({ media, onClose }) {
   )
 }
 
-function MessageBubble({ message, isMine, attachments = [], onEdit, onDelete }) {
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [isEditing, setIsEditing] = useState(false)
-  const [draft, setDraft] = useState(message.body || '')
+// One chat message. Sent messages are final: there is no edit or delete
+// (migration 0041). Messages edited or deleted before that still show
+// "(edited)" or "This message was deleted", so the history stays honest.
+function MessageBubble({ message, isMine, attachments = [] }) {
   const [lightboxMedia, setLightboxMedia] = useState(null)
-  const [saving, setSaving] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [currentTime, setCurrentTime] = useState(Date.now())
-
-  useEffect(() => {
-    setDraft(message.body || '')
-  }, [message.body])
-
-  useEffect(() => {
-    if (!message.created_at) return undefined
-
-    const expiresAt = new Date(message.created_at).getTime() + 5 * 60 * 1000
-    const remaining = expiresAt - Date.now()
-    if (remaining <= 0) {
-      setCurrentTime(Date.now())
-      return undefined
-    }
-
-    const timer = window.setTimeout(() => setCurrentTime(Date.now()), remaining)
-    return () => window.clearTimeout(timer)
-  }, [message.created_at])
 
   const isDeleted = Boolean(message.is_deleted || message.deleted_at)
-  const isEditable = isMine && !isDeleted && message.created_at && currentTime - new Date(message.created_at).getTime() < 5 * 60 * 1000
+  // A photo/video message whose file isn't available to show (still being
+  // checked, or removed by the check) would otherwise be an empty bubble.
+  const hasNothingToShow = !message.body && attachments.length === 0 && !message.pending
 
   const getStatusDisplay = () => {
     if (!isMine) return null
@@ -914,64 +849,10 @@ function MessageBubble({ message, isMine, attachments = [], onEdit, onDelete }) 
     return <span className="text-xs text-seal">✓✓</span>
   }
 
-  const handleEdit = async () => {
-    if (!onEdit) return
-    try {
-      setSaving(true)
-      await onEdit(message.id, draft)
-      setIsEditing(false)
-      setMenuOpen(false)
-    } catch (error) {
-      console.error('Failed to edit message:', error)
-      alert(error.message || 'Failed to edit message.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleDelete = async () => {
-    if (!onDelete) return
-    try {
-      setDeleting(true)
-      await onDelete(message.id)
-      setMenuOpen(false)
-    } catch (error) {
-      console.error('Failed to delete message:', error)
-      alert(error.message || 'Failed to delete message.')
-    } finally {
-      setDeleting(false)
-    }
-  }
-
   return (
     <>
       <div className={`flex w-full ${isMine ? 'justify-end' : 'justify-start'}`}>
         <div className={`relative flex max-w-[70%] items-end gap-1.5`}>
-          {isMine && !isDeleted && (
-            <div className="relative">
-              <button
-                type="button"
-                aria-label="Message actions"
-                onClick={() => setMenuOpen((current) => !current)}
-                className="mb-1 flex h-7 w-7 items-center justify-center rounded-full bg-surfacealt text-sm text-muted hover:bg-surfacealt/80"
-              >
-                ⋯
-              </button>
-              {menuOpen && (
-                <div className="absolute right-0 top-full z-20 mt-1 rounded-xl border border-hairline bg-white p-1 shadow-lg">
-                  {isEditable && (
-                    <button type="button" onClick={() => { setIsEditing(true); setMenuOpen(false) }} className="block w-full rounded-lg px-3 py-1.5 text-left text-xs text-ink hover:bg-surfacealt">
-                      Edit
-                    </button>
-                  )}
-                  <button type="button" onClick={handleDelete} disabled={deleting} className="block w-full rounded-lg px-3 py-1.5 text-left text-xs text-red-600 hover:bg-red-50 disabled:opacity-60">
-                    {deleting ? 'Deleting…' : 'Delete'}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
           <div className={`min-w-0 px-4 py-2.5 text-sm leading-relaxed break-words ${
             isMine 
               ? 'rounded-3xl rounded-br-sm bg-seal text-surface' 
@@ -984,23 +865,8 @@ function MessageBubble({ message, isMine, attachments = [], onEdit, onDelete }) 
                 ⚠️ This message was hidden — it looked like it contained bank account details. For your
                 safety, keep payments inside Trustall checkout.
               </p>
-            ) : isEditing ? (
-              <div className="min-w-[220px]">
-                <textarea
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  rows={3}
-                  className="w-full rounded-xl border border-white/30 bg-white/10 px-2 py-2 text-sm text-current placeholder:text-current/60 focus:outline-none focus:ring-2 focus:ring-white/50"
-                />
-                <div className="mt-2 flex items-center justify-end gap-2">
-                  <button type="button" onClick={() => { setIsEditing(false); setDraft(message.body || '') }} className="rounded-full bg-white/10 px-3 py-1 text-[11px] text-current hover:bg-white/15">
-                    Cancel
-                  </button>
-                  <button type="button" onClick={handleEdit} disabled={saving || draft.trim() === ''} className="rounded-full bg-white px-3 py-1 font-medium text-seal hover:bg-white/90 disabled:opacity-60">
-                    {saving ? 'Saving…' : 'Save'}
-                  </button>
-                </div>
-              </div>
+            ) : hasNothingToShow ? (
+              <p className="text-[13px] italic text-current/70">Photo or video unavailable</p>
             ) : (
               <>
                 {message.body && <p className="whitespace-pre-wrap">{message.body}{message.edited_at && <span className="ml-1 text-[10px] opacity-75">(edited)</span>}</p>}
