@@ -8,6 +8,7 @@ import {
   getEmailSignupOutcome,
   needsProfileSetup,
   readEmailLinkParams,
+  recoveryLinkStatus,
   safeRedirectPath,
   safeReferralCode,
   saveAuthIntent,
@@ -178,3 +179,12 @@ test('addresses that are not email links are ignored', () => {
     assert.equal(readEmailLinkParams(href), null, `expected ${href} to be ignored`)
   }
 })
+
+test('a used or expired reset link never counts as valid', () => {
+  assert.equal(recoveryLinkStatus({ type: 'recovery', error: null }), 'valid')
+  assert.equal(recoveryLinkStatus({ type: 'recovery', error: { message: 'Email link is invalid or has expired' } }), 'used')
+  assert.equal(recoveryLinkStatus({ type: 'email', error: null }), 'none')
+  assert.equal(recoveryLinkStatus({ type: null, error: null }), 'none')
+  assert.equal(recoveryLinkStatus(undefined), 'none')
+})
+

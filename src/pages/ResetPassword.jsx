@@ -3,6 +3,11 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Eye, EyeOff } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient.js'
 import { completeEmailLinkSignIn } from '../lib/emailLinkSession.js'
+import { recoveryLinkStatus } from '../lib/authFlow.js'
+import { signOutOtherDevices } from '../lib/signOut.js'
+
+const INVALID_LINK_MESSAGE = 'This password reset link is invalid or has expired. Please request a new one.'
+const USED_LINK_MESSAGE = 'This reset link has already been used or has expired. Request a new one if you still need to reset your password.'
 
 function PasswordInput({ label, value, onChange, visible, onToggle, autoComplete }) {
   return (
@@ -64,15 +69,24 @@ export default function ResetPassword() {
       const { data, error: sessionError } = await supabase.auth.getSession()
       if (!mounted) return
 
-      const isRecoveryLink = emailLink.type === 'recovery'
+      const linkStatus = recoveryLinkStatus(emailLink)
 
-      if (sessionError || (!data.session && !recoveryEventReceived)) {
-        setError('This password reset link is invalid or has expired. Please request a new one.')
+      // Each reset link works once. Supabase refuses a used or expired one;
+      // that answer wins even if this browser is still signed in from the
+      // first use, otherwise the old link would open the form again.
+      if (linkStatus === 'used') {
+        setError(USED_LINK_MESSAGE)
         setCheckingLink(false)
         return
       }
 
-      if (isRecoveryLink || recoveryEventReceived) {
+      if (sessionError || (!data.session && !recoveryEventReceived)) {
+        setError(INVALID_LINK_MESSAGE)
+        setCheckingLink(false)
+        return
+      }
+
+      if (linkStatus === 'valid' || recoveryEventReceived) {
         setRecoveryReady(true)
       } else {
         // A PKCE reset link (?code=, sent before the email template change)
@@ -118,11 +132,20 @@ export default function ResetPassword() {
 
     if (updateError) {
       setError(updateError.message || 'Unable to update your password. Please request a new reset link.')
-    } else {
-      setSuccess('Your password has been updated. You can now log in with your new password.')
-      setPassword('')
-      setConfirmation('')
+      setBusy(false)
+      return
     }
+
+    // Anyone else signed in to this account (e.g. whoever made the reset
+    // necessary) is signed out; this device stays signed in.
+    const { error: othersError } = await signOutOtherDevices()
+    if (othersError) console.warn('Could not sign out other devices after the password reset:', othersError)
+
+    setSuccess(othersError
+      ? 'Your password has been updated. You can now log in with your new password.'
+      : 'Your password has been updated, and you have been signed out on your other devices.')
+    setPassword('')
+    setConfirmation('')
     setBusy(false)
   }
 

@@ -136,3 +136,14 @@ export function readEmailLinkParams(href) {
 
   return null
 }
+
+// What the reset link in the address amounts to, from completeEmailLinkSignIn():
+//   'valid' Supabase accepted it (first use, not expired)
+//   'used'  it is a reset link but Supabase refused it: already used or expired
+//   'none'  the address holds no reset link
+// A 'used' link must never open the reset form, even in a browser that is
+// still signed in from using the link the first time.
+export function recoveryLinkStatus(emailLink) {
+  if (emailLink?.type !== 'recovery') return 'none'
+  return emailLink.error ? 'used' : 'valid'
+}
