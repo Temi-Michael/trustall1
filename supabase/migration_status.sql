@@ -42,6 +42,7 @@ from (values
   ('0037', 'function chat_contact_violation', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'chat_contact_violation')),
   ('0038', 'function complete_profile_setup', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'complete_profile_setup')),
   ('0039', 'policy Users delete own device tokens', exists (select 1 from pg_policies where policyname = 'Users delete own device tokens')),
-  ('0040', 'function get_my_payment_readiness', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'get_my_payment_readiness'))
+  ('0040', 'function get_my_payment_readiness', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'get_my_payment_readiness')),
+  ('0041', 'function keep_sent_messages_unchanged', exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'keep_sent_messages_unchanged'))
 ) as m(migration, checks_for, applied)
 order by m.migration;
