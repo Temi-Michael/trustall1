@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   getUnreadNotificationCount,
   fetchNotifications,
@@ -13,7 +13,8 @@ import {
   getNotificationDisplayTitle,
 } from "../lib/notificationUtils";
 import { supabase } from "../lib/supabaseClient.js";
-import { sendBrowserNotification } from "../lib/notifications.js";
+import { SHOW_NOTIFICATION_EVENT, showAppNotification } from "../lib/notifications.js";
+import { isUuid } from "../../supabase/functions/_shared/notificationRoutes.js";
 
 export function NotificationBell({ userId }) {
   const [open, setOpen] = useState(false);
@@ -25,6 +26,8 @@ export function NotificationBell({ userId }) {
   const ref = useRef(null);
   const senderNamesRef = useRef({});
   const navigate = useNavigate();
+  const location = useLocation();
+  const [selectedNotification, setSelectedNotification] = useState(null);
 
   const loadNotifications = useCallback(async () => {
     try {
@@ -62,18 +65,70 @@ export function NotificationBell({ userId }) {
       });
       setUnreadCount((prev) => prev + 1);
 
-      if (Notification.permission === 'granted') {
-        sendBrowserNotification(
-          getNotificationDisplayTitle(newNotification, senderNamesRef.current[newNotification.sender_id]),
-          newNotification.message || "You have a new notification"
-        );
-      }
+      // Only while the app is out of view, with the push's tag for this row,
+      // and a tap opens the same page as "View".
+      showAppNotification({
+        title: getNotificationDisplayTitle(newNotification, senderNamesRef.current[newNotification.sender_id]),
+        body: newNotification.message || "You have a new notification",
+        notificationId: newNotification.id,
+        path: getNotificationRoute(newNotification),
+      });
     });
 
     return () => {
       if (unsubscribe) unsubscribe();
     };
   }, [userId, loadNotifications]);
+
+  // Shows one notification's full message (marketing has no page of its own).
+  // The row is read back from the database, limited to this user's own, so an
+  // id from a link can never show someone else's notification.
+  const showNotificationById = useCallback(async (notificationId) => {
+    if (!userId || !isUuid(notificationId)) return;
+    const { data, error } = await supabase
+      .from("notifications")
+      .select("*")
+      .eq("id", notificationId)
+      .eq("recipient_id", userId)
+      .maybeSingle();
+    if (error || !data) return;
+
+    setSelectedNotification(data);
+    if (!data.read_at) {
+      await markNotificationRead(data.id);
+      setNotifications((prev) => prev.filter((n) => n.id !== data.id));
+      setUnreadCount(await getUnreadNotificationCount(userId));
+    }
+  }, [userId]);
+
+  // A tapped marketing push (public/sw.js) or app pop-up (notifications.js).
+  useEffect(() => {
+    function onWorkerMessage(event) {
+      if (event.data?.type === SHOW_NOTIFICATION_EVENT) showNotificationById(event.data.notificationId);
+    }
+    function onPageEvent(event) {
+      showNotificationById(event.detail?.notificationId);
+    }
+    navigator.serviceWorker?.addEventListener("message", onWorkerMessage);
+    window.addEventListener(SHOW_NOTIFICATION_EVENT, onPageEvent);
+    return () => {
+      navigator.serviceWorker?.removeEventListener("message", onWorkerMessage);
+      window.removeEventListener(SHOW_NOTIFICATION_EVENT, onPageEvent);
+    };
+  }, [showNotificationById]);
+
+  // A tapped marketing push that had to open the app arrives as
+  // /?notification=<id>. The id is taken out of the address so a reload or
+  // a shared link doesn't open it again.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const notificationId = params.get("notification");
+    if (notificationId === null) return;
+    params.delete("notification");
+    const search = params.toString();
+    navigate({ pathname: location.pathname, search: search ? `?${search}` : "", hash: location.hash }, { replace: true });
+    showNotificationById(notificationId);
+  }, [location.pathname, location.search, location.hash, navigate, showNotificationById]);
 
   useEffect(() => {
     if (!notifications.length) return;
@@ -129,8 +184,6 @@ export function NotificationBell({ userId }) {
     }
   }, [unreadCount]);
 
-  const [selectedNotification, setSelectedNotification] = useState(null);
-
   async function handleNotificationClick(notification) {
     try {
       await markNotificationRead(notification.id);
@@ -152,12 +205,9 @@ export function NotificationBell({ userId }) {
 
   function handleNotificationView() {
     if (!selectedNotification) return;
+    // null for marketing: the full message is already on screen.
     const route = getNotificationRoute(selectedNotification);
-    if (selectedNotification.type === 'marketing' || !route || route === '/notifications') {
-      closeNotificationDetail();
-      return;
-    }
-    navigate(route);
+    if (route) navigate(route);
     closeNotificationDetail();
   }
 
@@ -277,7 +327,7 @@ export function NotificationBell({ userId }) {
           </div>
 
           <div className="mt-4 flex flex-wrap gap-2">
-            {(selectedNotification.type !== 'marketing' && getNotificationRoute(selectedNotification)) ? (
+            {getNotificationRoute(selectedNotification) ? (
               <button
                 onClick={handleNotificationView}
                 className="rounded-full bg-seal px-4 py-2 font-mono text-xs font-semibold text-surface hover:bg-seal-deep"

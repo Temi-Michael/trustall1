@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient.js";
+import { getNotificationPath } from "../../supabase/functions/_shared/notificationRoutes.js";
 
 export { getNotificationDisplayTitle, getNotificationBadgeSummary } from "./notificationFormat.js";
 
@@ -167,99 +168,41 @@ export function formatRelativeTime(dateString) {
 }
 
 /**
- * Get the appropriate route/URL for a notification based on its type
- * This is used for deep linking when notifications are clicked
+ * The page "View" opens for a notification, or null when it has no page of its
+ * own (marketing): the bell then just shows the full message. Push taps use the
+ * same table (supabase/functions/_shared/notificationRoutes.js).
  */
 export function getNotificationRoute(notification) {
-  if (!notification) return "/";
-
-  const { type, related_conversation_id, related_order_id, related_offer_id, related_dispute_id } = notification;
-
-  switch (type) {
-    // Message notifications
-    case "new_message":
-    case "offer_received":
-    case "offer_accepted":
-    case "delivery_address_shared":
-      return related_conversation_id ? `/messages/${related_conversation_id}` : "/messages";
-
-    // Order notifications
-    case "payment_pending":
-    case "payment_released":
-    case "delivered":
-    case "order_confirmed":
-    case "delivery_confirmed":
-    case "order_status_updated":
-      return related_order_id ? `/orders/${related_order_id}` : "/orders";
-
-    // Review notifications
-    case "review_received":
-      return related_order_id ? `/orders/${related_order_id}` : "/orders";
-
-    // Verification notifications
-    case "verification_decided":
-      return "/sell";
-
-    // Dispute notifications
-    case "dispute_filed":
-    case "dispute_created":
-    case "dispute_message":
-    case "dispute_resolved":
-      return related_dispute_id ? `/disputes/${related_dispute_id}` : "/disputes";
-
-    // Payout notifications
-    case "payout_initiated":
-    case "payout_completed":
-      return "/orders";
-
-    // Default to home
-    default:
-      return "/";
-  }
+  return getNotificationPath(notification);
 }
 
-/**
- * Send a push notification via Firebase Cloud Messaging
- * This is typically done server-side, but can be used for testing
- */
-export async function sendPushNotification(title, body, options = {}) {
-  try {
-    // This would typically be done server-side via Supabase Functions
-    // For now, just show a browser notification
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification(title, {
-        body,
-        icon: '/icon.svg',
-        ...options,
-      });
-    }
-  } catch (error) {
-    console.error("Failed to send push notification:", error);
-  }
-}
+const NOTIFICATION_ICONS = new Map([
+  ["new_message", "💬"],
+  ["offer_received", "🏷️"],
+  ["offer_accepted", "✅"],
+  ["delivery_address_shared", "📍"],
+  ["payment_pending", "⏳"],
+  ["payment_confirmed", "💳"],
+  ["payment_released", "💰"],
+  ["delivered", "📦"],
+  ["order_confirmed", "✓"],
+  ["delivery_confirmed", "🚚"],
+  ["review_received", "⭐"],
+  ["verification_decided", "✅"],
+  ["dispute_filed", "⚠️"],
+  ["dispute_opened", "⚠️"],
+  ["dispute_created", "⚠️"],
+  ["dispute_message", "💬"],
+  ["dispute_resolved", "✅"],
+  ["payout_initiated", "💸"],
+  ["payout_completed", "💰"],
+  ["marketing", "📣"],
+]);
 
 /**
  * Get notification icon based on type
  * Used for displaying appropriate emoji/icon in notification list
  */
 export function getNotificationIcon(type) {
-  const icons = {
-    new_message: "💬",
-    offer_received: "🏷️",
-    offer_accepted: "✅",
-    payment_pending: "⏳",
-    payment_released: "💰",
-    delivered: "📦",
-    order_confirmed: "✓",
-    delivery_confirmed: "🚚",
-    review_received: "⭐",
-    verification_decided: "✅",
-    dispute_created: "⚠️",
-    dispute_message: "💬",
-    dispute_resolved: "✅",
-    payout_initiated: "💸",
-    payout_completed: "💰",
-  };
-  
-  return icons[type] || "🔔";
+  return NOTIFICATION_ICONS.get(type) || "🔔";
 }

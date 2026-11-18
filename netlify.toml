@@ -2,10 +2,16 @@
   command = "npm run build"
   publish = "dist"
 
+# The site moved to www.trustall.online (Vercel). The old Netlify address sends
+# every page there, path and query kept. force: even files that exist here
+# (sw.js, the app itself) redirect, so nobody keeps using the old address:
+# notification permission and sign-ins belong to one address, and the
+# backend no longer accepts requests from this one.
 [[redirects]]
   from = "/*"
-  to = "/index.html"
-  status = 200
+  to = "https://www.trustall.online/:splat"
+  status = 301
+  force = true
 
 # Security headers: no framing by other sites (clickjacking), no MIME sniffing,
 # and no referrer leaks to other sites.

@@ -13,6 +13,21 @@ import { messaging, onMessage } from './lib/firebaseConfig.js'
 import { registerPushToken, unregisterPushToken } from './lib/useRegisterPush.js'
 import { startPresenceTracking, stopPresenceTracking } from './lib/presenceUtils.js'
 import { LAST_USER_ID_STORAGE_KEY } from './lib/signOut.js'
+import { showAppNotification } from './lib/notifications.js'
+import { safeRedirectPath } from './lib/authFlow.js'
+import { NotificationPrompt } from './components/NotificationPrompt.jsx'
+
+// The path of a push's full address, kept to this site ("/" otherwise).
+function sitePathFromUrl(value) {
+  // new URL(undefined, origin) would be the page "/undefined".
+  if (typeof value !== 'string' || !value) return '/'
+  try {
+    const url = new URL(value, window.location.origin)
+    return safeRedirectPath(`${url.pathname}${url.search}${url.hash}`)
+  } catch {
+    return '/'
+  }
+}
 
 const Home = lazy(() => import('./pages/Home.jsx'))
 const Admin = lazy(() => import('./pages/Admin.jsx'))
@@ -63,18 +78,22 @@ function GlobalSetup() {
     // Set up presence tracking
     const unsubscribePresence = startPresenceTracking(session.user.id)
 
-    // Register push token and request notification permission in one flow.
+    // Registers this device for pushes if permission was already given. Asking
+    // is left to NotificationPrompt, from a tap, as iPhones require.
     registerPushToken(session.user.id)
 
-    // Set up foreground message handling
+    // A push while the app is open comes here instead of the service worker.
+    // The bell's live update shows the same notification with the same tag,
+    // so at most one pop-up appears, and none while the app is in view.
     const unsubscribeMessages = messaging ? onMessage(messaging, (payload) => {
-      console.log('Foreground message received:', payload)
-      const title = payload.notification?.title || payload.data?.title || 'Trustall'
-      const body = payload.notification?.body || payload.data?.body || 'You have a new notification'
-      // Show both notification-style and data-only foreground FCM payloads.
-      if (Notification.permission === 'granted') {
-        new Notification(title, { body, icon: '/icon-192.svg', tag: 'trustall-notification' })
-      }
+      const data = payload.data || {}
+      const inAppOnly = data.inAppOnly === 'true'
+      showAppNotification({
+        title: data.title || payload.notification?.title,
+        body: data.body || payload.notification?.body,
+        notificationId: data.notificationId,
+        path: inAppOnly ? null : sitePathFromUrl(data.actionUrl),
+      })
     }) : () => {}
 
     return () => {
@@ -123,6 +142,7 @@ export default function App() {
         <div className="app-shell flex min-h-screen flex-col bg-surface">
           {!isAdminRoute && <Navbar />}
           {!isAdminRoute && <ProfileSetupBanner />}
+          {!isAdminRoute && <NotificationPrompt />}
           <main className={isAdminRoute ? 'flex-1' : 'flex-1 pb-24 md:pb-0'}>
             <ScrollToTop />
             <Suspense fallback={<div className="flex min-h-[40vh] items-center justify-center text-sm text-muted">Loading…</div>}>

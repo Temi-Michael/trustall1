@@ -49,38 +49,44 @@ async function getAppServiceWorkerRegistration() {
   return registration
 }
 
+// Whether this browser can get pushes at all. An iPhone only can from the app
+// added to the home screen (iOS 16.4+); Safari tabs there have no Notification.
+export function pushIsSupported() {
+  return Boolean(messaging)
+    && typeof Notification !== "undefined"
+    && "serviceWorker" in navigator
+    && typeof window !== "undefined" && "PushManager" in window;
+}
+
 /**
- * Register push token and set up token refresh
- * Token should be refreshed every 24 hours as per Firebase recommendations
+ * Asks for permission, then registers this device. Call it directly from a
+ * tap or click (NotificationPrompt): iPhones and Safari ignore a request that
+ * isn't. Returns the permission: "granted", "denied", "default" or "unsupported".
+ */
+export async function enablePushNotifications(userId) {
+  if (!pushIsSupported()) return "unsupported";
+  let permission = Notification.permission;
+  if (permission === "default") {
+    try {
+      // First thing in the tap: nothing may be awaited before this.
+      permission = (await Notification.requestPermission()) || Notification.permission;
+    } catch {
+      permission = Notification.permission;
+    }
+  }
+  if (permission === "granted") await registerPushToken(userId);
+  return permission;
+}
+
+/**
+ * Registers this device for pushes when permission was already given, and
+ * refreshes the token every 24 hours as Firebase recommends. Never asks for
+ * permission: a request without a tap is ignored or hidden by browsers.
  */
 export async function registerPushToken(userId) {
   try {
-    if (!messaging || typeof Notification === "undefined") {
-      return;
-    }
-
-    // Check if service workers are supported
-    if (!("serviceWorker" in navigator)) {
-      console.log("Service Workers not supported");
-      return;
-    }
-
-    // Check if notifications are already denied
-    if (Notification.permission === "denied") {
-      console.log("Notification permission denied by user");
-      return;
-    }
-
-    // Request permission only if not already granted
-    let permission = Notification.permission;
-    if (permission === "default") {
-      permission = await Notification.requestPermission();
-    }
-
-    if (permission !== "granted") {
-      console.log("Notification permission not granted:", permission);
-      return;
-    }
+    if (!userId || !pushIsSupported()) return;
+    if (Notification.permission !== "granted") return;
 
     const registration = await getAppServiceWorkerRegistration()
     if (!registration) return
