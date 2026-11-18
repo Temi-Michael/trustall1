@@ -1,16 +1,23 @@
 import { supabase } from './supabaseClient.js'
+import { isUuid } from '../../supabase/functions/_shared/notificationRoutes.js'
+
+// Asks the bell to show one notification's full message. public/sw.js posts
+// it after a tap on a marketing push; a pop-up shown by the app dispatches it.
+export const SHOW_NOTIFICATION_EVENT = 'trustall:show-notification'
 
 export function supportsNotifications() {
   return typeof window !== 'undefined' && 'Notification' in window
 }
 
+// Call it straight from a tap or click: iPhones and Safari ignore a request
+// that isn't, and Chrome hides it behind a quiet icon.
 export async function ensureNotificationPermission() {
   if (!supportsNotifications()) return 'unsupported'
   if (Notification.permission === 'granted') return 'granted'
   if (Notification.permission === 'denied') return 'denied'
   try {
     const result = await Notification.requestPermission()
-    return result
+    return result || Notification.permission
   } catch (error) {
     return 'unsupported'
   }
@@ -31,25 +38,53 @@ function navigateWithinApp(path) {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
-export async function sendBrowserNotification(title, body, tag = 'trustall') {
-  if (!supportsNotifications()) return
+// Whether the person is looking at the app. The bell and the page then update
+// in place, and a pop-up on top would only repeat them.
+function appIsInView() {
+  return document.visibilityState === 'visible' && document.hasFocus()
+}
 
-  if (Notification.permission === 'default') {
-    const permission = await ensureNotificationPermission()
-    if (permission !== 'granted') return
+/**
+ * A browser pop-up from the open app, only while it is out of view and only
+ * if permission was already given (this never asks).
+ * notificationId: the notifications row, when there is one. Its tag is the one
+ *   public/sw.js gives the push for the same row, so the push and this pop-up
+ *   replace each other instead of showing twice.
+ * path: the page a tap opens; with a notificationId and no path, a tap shows
+ *   the full message in the bell (marketing).
+ */
+export async function showAppNotification({ title, body, notificationId = null, path = null, tag = 'trustall' } = {}) {
+  if (!supportsNotifications() || Notification.permission !== 'granted' || appIsInView()) return
+
+  const id = isUuid(notificationId) ? notificationId : null
+  const inAppOnly = Boolean(id) && !path
+  const options = {
+    body: body || 'You have a new notification',
+    icon: '/icon-192.svg',
+    badge: '/icon-192.svg',
+    tag: id ? `trustall-${id}` : tag,
+    data: { url: path, notificationId: id, inAppOnly },
   }
 
-  if (Notification.permission !== 'granted') return
+  // Through the service worker where possible: Android refuses new
+  // Notification(), and the worker sends the tap to the right page.
+  try {
+    const registration = await navigator.serviceWorker?.getRegistration('/')
+    if (registration?.active) {
+      await registration.showNotification(title || 'Trustall', options)
+      return
+    }
+  } catch (error) {
+    console.warn('Service worker notification failed', error)
+  }
 
   try {
-    const notification = new Notification(title, {
-      body,
-      icon: '/icon.svg',
-      tag,
-    })
+    const notification = new Notification(title || 'Trustall', options)
     notification.onclick = () => {
       window.focus()
-      navigateWithinApp('/messages')
+      notification.close()
+      if (inAppOnly) window.dispatchEvent(new CustomEvent(SHOW_NOTIFICATION_EVENT, { detail: { notificationId: id } }))
+      else if (path) navigateWithinApp(path)
     }
   } catch (error) {
     console.warn('Browser notification failed', error)
@@ -76,8 +111,8 @@ export async function sendNotificationEmail({ subject, body }) {
   }
 }
 
-export async function notifyConversationEvent({ emailSelf = false, title, body, preview }) {
-  sendBrowserNotification(title, preview || body, 'conversation')
+export async function notifyConversationEvent({ emailSelf = false, title, body, preview, path = null }) {
+  showAppNotification({ title, body: preview || body, path, tag: 'conversation' })
   if (emailSelf) {
     await sendNotificationEmail({ subject: title, body })
   }

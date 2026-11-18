@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { getPublicSiteHost } from '../lib/authRedirect.js'
 import { supabase } from '../lib/supabaseClient.js'
 import { useProfile } from '../lib/useProfile.js'
-import { ensureNotificationPermission, notifyConversationEvent } from '../lib/notifications.js'
+import { notifyConversationEvent } from '../lib/notifications.js'
 import { LISTING_CATEGORIES } from '../lib/listingCategories.js'
 import ServiceGigWizard from '../components/ServiceGigWizard.jsx'
 import { NIGERIAN_BANKS } from '../lib/nigerianBanks.js'
@@ -876,12 +876,14 @@ function ListingsBlock({ profile, session }) {
       setError('Listing created, but some variants failed to save. You can edit the listing to add them again.')
     }
 
-    await ensureNotificationPermission()
+    // Permission is asked for by the "Turn on notifications" prompt, from a
+    // direct tap; asking here, after the upload, is ignored on iPhones.
     await notifyConversationEvent({
       emailSelf: true,
       title: editingId ? 'Listing updated' : 'New listing published',
       body: editingId ? 'Your listing has been updated on Trustall.' : 'Your new listing is now live on Trustall.',
       preview: editingId ? 'Your listing has been updated on Trustall.' : 'Your new listing is now live on Trustall.',
+      path: '/sell',
     })
     loadListings()
   }

@@ -19,8 +19,8 @@ export function getNotificationBadgeSummary(notifications = []) {
     if (notification.type === 'new_message') {
       summary.message += 1;
     } else if (
-      ['payment_pending', 'payment_released', 'delivered', 'order_confirmed', 'delivery_confirmed', 'order_status_updated', 'payout_initiated', 'payout_completed'].includes(notification.type)
-      || notification.type.startsWith('order')
+      ['payment_pending', 'payment_confirmed', 'payment_released', 'delivered', 'order_confirmed', 'delivery_confirmed', 'order_status_updated', 'payout_initiated', 'payout_completed'].includes(notification.type)
+      || String(notification.type || '').startsWith('order')
     ) {
       summary.order += 1;
     } else {

@@ -7,7 +7,6 @@ import { fetchPayoutConnected } from '../lib/profileFields.js'
 import { markConversationRead, subscribeToMessageReadUpdates } from '../lib/readReceiptUtils.js'
 import { SealMark } from '../components/Navbar.jsx'
 import { isOnline, formatLastSeen, subscribeToUserPresence } from '../lib/presenceUtils.js'
-import { ensureNotificationPermission, sendBrowserNotification } from '../lib/notifications.js'
 import { markConversationNotificationsRead } from '../lib/notificationUtils.js'
 import { getSupportEmail } from '../lib/authRedirect.js'
 import { usePaymentReadiness } from '../lib/usePaymentReadiness.js'
@@ -72,13 +71,6 @@ export default function Messages() {
   useEffect(() => {
     if (!loading && !session) navigate('/auth', { state: { redirectTo: '/messages' } })
   }, [loading, session, navigate])
-
-  // Request notification permission on mount
-  useEffect(() => {
-    if (session?.user?.id) {
-      ensureNotificationPermission().catch(err => console.warn('Notification permission request failed:', err))
-    }
-  }, [session?.user?.id])
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow
@@ -155,12 +147,9 @@ function ConversationList({ userId, activeId }) {
     load()
     const channel = supabase
       .channel('conversations-list')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, (payload) => {
-        if (payload.new?.sender_id && payload.new.sender_id !== userId) {
-          sendBrowserNotification('New message', payload.new.body || 'You have a new message in your conversation')
-        }
-        load()
-      })
+      // Pop-ups for new messages come from the bell (each message also makes
+      // a notification), so the list only refreshes here.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => load())
       .subscribe()
     return () => supabase.removeChannel(channel)
   }, [userId])
@@ -323,19 +312,11 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
     const channel = supabase
       .channel(`thread-${conversationId}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` }, (payload) => {
-        // Send browser notification if sender is not current user
-        if (payload.new.sender_id !== userId) {
-          sendBrowserNotification('New message', payload.new.body || 'You have a new message in your conversation')
-          markConversationRead(conversationId)
-        }
+        if (payload.new.sender_id !== userId) markConversationRead(conversationId)
         loadThread()
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` }, (payload) => {
-        if (payload.new?.sender_id !== userId) {
-          sendBrowserNotification('Message updated', payload.new?.body || 'A message in your conversation was updated')
-        }
-        loadThread()
-      })
+      // Updates are read receipts and similar: refresh, never a pop-up.
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` }, loadThread)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'offers', filter: `conversation_id=eq.${conversationId}` }, loadThread)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'offers', filter: `conversation_id=eq.${conversationId}` }, loadThread)
       .subscribe()
