@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabaseClient.js'
 import { useProfile } from '../lib/useProfile.js'
 import { PROMOTION_PLACEMENTS } from '../lib/promotions.js'
 import { usePaymentReadiness } from '../lib/usePaymentReadiness.js'
+import { holdInactivity } from '../lib/deviceSession.js'
 
 const TARGET_TYPES = [
   { id: 'product', label: 'Product' },
@@ -70,6 +71,11 @@ export default function Marketing() {
   // promotion server code only exists on Supabase (issue 6.6), so for now this
   // check is in the app only.
   const { readiness } = usePaymentReadiness({ enabled: Boolean(profile?.verified_seller) })
+  // No sign-out for inactivity while the Paystack window is open.
+  useEffect(() => {
+    holdInactivity('promotion-checkout', submitting)
+    return () => holdInactivity('promotion-checkout', false)
+  }, [submitting])
 
   useEffect(() => {
     if (!loading && !session) navigate('/auth', { state: { redirectTo: '/marketing' } })

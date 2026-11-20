@@ -52,8 +52,8 @@ export async function signOutThisDevice({ navigate = null, redirectTo = '/' } = 
 
 /**
  * Ends every other session of this account and keeps this one. Other devices
- * notice when their access token next renews (within the JWT expiry set in
- * Supabase, one hour by default), then sign out on their own.
+ * notice when their access token next renews (within the access token expiry set in
+ * Supabase, 15 minutes for Trustall), then sign out on their own.
  *
  * @returns {Promise<{ error: Error | null }>}
  */

@@ -7,6 +7,7 @@ Paste each one into **Supabase → Authentication → Emails** (the template's m
 |---|---|---|
 | `confirm-signup.html` | Confirm signup | Confirm your email to start using Trustall |
 | `reset-password.html` | Reset password | Reset your Trustall password |
+| `password-changed.html` | Password changed (security notification; switch it on first) | Your Trustall password was changed |
 
 - Links use `{{ .SiteURL }}` + `token_hash`, so they open on any device (the app signs the user in with `verifyOtp`; see `src/lib/emailLinkSession.js`). **Site URL** in Supabase must be `https://www.trustall.online`.
 - "Expires in 1 hour" matches **Email OTP expiration** (3600 seconds). Change both together.

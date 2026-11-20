@@ -55,6 +55,7 @@ const MARKERS = {
   '0039': ['policy', 'Users delete own device tokens'],
   '0040': ['function', 'get_my_payment_readiness'],
   '0041': ['function', 'keep_sent_messages_unchanged'],
+  '0042': ['table', 'user_devices'],
 }
 // Migrations with nothing unique to check. They are safe to run again, so on a
 // database without history they simply run.

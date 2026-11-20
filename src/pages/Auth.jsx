@@ -45,6 +45,13 @@ export default function Auth() {
   const refCode = intent.refCode
   const isGoogleSignupCompletion = needsProfileSetup(intent.flow, session, profile)
 
+  // Arrived here after being signed out for inactivity (InactivityGuard).
+  useEffect(() => {
+    if (location.state?.signedOutReason === 'inactive') {
+      setInfo("For your security, you were signed out because this device wasn't used for a while. Log in again to continue.")
+    }
+  }, [location.state?.signedOutReason])
+
   useEffect(() => {
     if (!loading && session?.user?.id && !isGoogleSignupCompletion) {
       clearAuthIntent(window.sessionStorage)
