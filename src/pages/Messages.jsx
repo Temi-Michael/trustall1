@@ -10,6 +10,7 @@ import { isOnline, formatLastSeen, subscribeToUserPresence } from '../lib/presen
 import { markConversationNotificationsRead } from '../lib/notificationUtils.js'
 import { getSupportEmail } from '../lib/authRedirect.js'
 import { usePaymentReadiness } from '../lib/usePaymentReadiness.js'
+import { holdInactivity } from '../lib/deviceSession.js'
 import { describePaymentRequirement, isPaymentVerificationError, verificationPageLink } from '../lib/paymentReadiness.js'
 import { Paperclip, Send } from 'lucide-react'
 
@@ -924,6 +925,13 @@ function OfferCard({ offer, isSeller, userId, buyerEmail, sellerPayoutConnected 
   const location = useLocation()
   const { readiness, refresh: refreshReadiness } = usePaymentReadiness({ enabled: !isSeller && offer.status === 'pending' })
   const needsVerification = Boolean(readiness?.checked && !readiness.ready)
+  // Nobody is signed out for inactivity while paying: taps inside the
+  // Paystack window can't be seen by the app.
+  useEffect(() => {
+    const reason = `offer-checkout:${offer.id}`
+    holdInactivity(reason, paying)
+    return () => holdInactivity(reason, false)
+  }, [paying, offer.id])
 
   async function shareDeliveryAddress() {
     const cleanAddress = deliveryAddress.trim()

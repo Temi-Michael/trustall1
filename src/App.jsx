@@ -16,6 +16,8 @@ import { LAST_USER_ID_STORAGE_KEY } from './lib/signOut.js'
 import { showAppNotification } from './lib/notifications.js'
 import { safeRedirectPath } from './lib/authFlow.js'
 import { NotificationPrompt } from './components/NotificationPrompt.jsx'
+import { InactivityGuard } from './components/InactivityGuard.jsx'
+import { MainDevicePrompt } from './components/MainDevicePrompt.jsx'
 
 // The path of a push's full address, kept to this site ("/" otherwise).
 function sitePathFromUrl(value) {
@@ -143,6 +145,8 @@ export default function App() {
           {!isAdminRoute && <Navbar />}
           {!isAdminRoute && <ProfileSetupBanner />}
           {!isAdminRoute && <NotificationPrompt />}
+          {!isAdminRoute && <MainDevicePrompt />}
+          <InactivityGuard />
           <main className={isAdminRoute ? 'flex-1' : 'flex-1 pb-24 md:pb-0'}>
             <ScrollToTop />
             <Suspense fallback={<div className="flex min-h-[40vh] items-center justify-center text-sm text-muted">Loading…</div>}>
