@@ -49,3 +49,30 @@ export function getPresenceLabel(isOnline, lastSeenAt, now = new Date()) {
   if (!lastSeenAt) return 'Offline'
   return `Offline • Last seen ${getRelativeTimeLabel(lastSeenAt, now)}`
 }
+
+/**
+ * Whether Enter in the message box should send the message.
+ *
+ * - On a computer, Enter sends and Shift+Enter (or Alt+Enter) starts a new line.
+ * - On a phone or tablet, Enter always starts a new line and the send button
+ *   sends: touch keyboards have no Shift+Enter, so that is the only way to
+ *   write on more than one line.
+ * - Never while a word is still being composed (keyboards for accents and
+ *   other scripts use Enter to pick the word).
+ *
+ * @param {{ key: string, shiftKey?: boolean, altKey?: boolean, isComposing?: boolean, keyCode?: number }} event
+ * @param {{ touchKeyboard?: boolean }} [options]
+ */
+export function shouldSendOnEnter(event, { touchKeyboard = false } = {}) {
+  if (event?.key !== 'Enter') return false
+  if (event.isComposing || event.keyCode === 229) return false
+  if (event.shiftKey || event.altKey) return false
+  return !touchKeyboard
+}
+
+/** True on phones and tablets (the main pointer is a finger, not a mouse). */
+export function hasTouchKeyboard() {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(pointer: coarse)').matches
+}

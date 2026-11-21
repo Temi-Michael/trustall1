@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from 'react'
+﻿import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useParams, useNavigate, Link, useSearchParams, useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient.js'
 import { useProfile } from '../lib/useProfile.js'
@@ -12,7 +12,13 @@ import { getSupportEmail } from '../lib/authRedirect.js'
 import { usePaymentReadiness } from '../lib/usePaymentReadiness.js'
 import { holdInactivity } from '../lib/deviceSession.js'
 import { describePaymentRequirement, isPaymentVerificationError, verificationPageLink } from '../lib/paymentReadiness.js'
+import { safeFileName } from '../lib/inputSafety.js'
+import { hasTouchKeyboard, shouldSendOnEnter } from '../lib/chatUtils.js'
+import { formatConversationTime, formatFullTimestamp, formatMessageTime, groupByDay } from '../lib/messageTime.js'
 import { Paperclip, Send } from 'lucide-react'
+
+// The message box grows to about five lines (20px each, plus padding), then scrolls.
+const COMPOSER_MAX_HEIGHT_PX = 128
 
 export default function Messages() {
   const { conversationId } = useParams()
@@ -235,9 +241,15 @@ function ConversationList({ userId, activeId }) {
                   {isSellerVerified && <SealMark size={14} />}
                 </div>
                 {c.last_message_at && (
-                  <span className="shrink-0 font-mono text-[10px] text-muted">
-                    {new Date(c.last_message_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                  </span>
+                  // "3:45 PM" today, then "Yesterday", "Mon", "16 Nov": a bare
+                  // time made last week's messages look like today's.
+                  <time
+                    dateTime={c.last_message_at}
+                    title={formatFullTimestamp(c.last_message_at)}
+                    className="shrink-0 font-mono text-[10px] text-muted"
+                  >
+                    {formatConversationTime(c.last_message_at)}
+                  </time>
                 )}
               </div>
               <p className="mt-0.5 truncate font-mono text-[11px] text-muted">
@@ -273,8 +285,32 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
   const [threadError, setThreadError] = useState('')
   const listingContextInitialized = useRef(false)
   const messagesRef = useRef(null)
+  const composerRef = useRef(null)
   const hasInitialMessageScroll = useRef(false)
   const shouldStickToMessageBottom = useRef(true)
+  // Phones and tablets: Enter adds a new line and the button sends.
+  const [touchKeyboard] = useState(hasTouchKeyboard)
+
+  // The message box grows with its text, up to about five lines, then
+  // scrolls. Runs whenever the text changes, including when it's filled in
+  // ("Hi, I'm interested in…") or cleared after sending.
+  useLayoutEffect(() => {
+    const box = composerRef.current
+    if (!box) return
+    box.style.height = 'auto'
+    box.style.height = `${Math.min(box.scrollHeight, COMPOSER_MAX_HEIGHT_PX)}px`
+    box.style.overflowY = box.scrollHeight > COMPOSER_MAX_HEIGHT_PX ? 'auto' : 'hidden'
+  }, [body, offerMode])
+
+  function handleComposerKeyDown(event) {
+    if (!shouldSendOnEnter(event, { touchKeyboard })) return
+    event.preventDefault()
+    // Same rule as the send button: one message at a time.
+    if (sending || uploadingAttachments) return
+    const form = event.currentTarget.form
+    if (form?.requestSubmit) form.requestSubmit()
+    else sendMessage(event)
+  }
 
   async function retryPendingMessages() {
     if (!navigator.onLine || pendingMessages.length === 0) return
@@ -689,10 +725,12 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
       )}
 
       <div ref={messagesRef} onScroll={updateMessageScrollPosition} className="flex-1 space-y-2 overscroll-contain overflow-y-auto px-3 py-3 sm:px-4" style={{ minHeight: 0 }}>
-        {items.map((item) =>
-          item.kind === 'offer' ? (
+        {groupByDay(items).map((row) => {
+          if (row.type === 'day') return <DayDivider key={row.key} label={row.label} />
+          const item = row.item
+          return item.kind === 'offer' ? (
             <OfferCard
-              key={item.id}
+              key={row.key}
               offer={item}
               isSeller={isSeller}
               conversationId={conversationId}
@@ -702,13 +740,13 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
             />
           ) : (
             <MessageBubble
-              key={item.id}
+              key={row.key}
               message={item}
               isMine={item.sender_id === userId}
               attachments={attachmentsByMessageId[item.id] || []}
             />
           )
-        )}
+        })}
       </div>
 
       {offerMode ? (
@@ -740,15 +778,23 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
               {composerNotice}
             </p>
           )}
-          <div className="flex gap-2">
-            <input
+          <div className="flex items-end gap-2">
+            <label htmlFor="chat-message-input" className="sr-only">Message</label>
+            <textarea
+              id="chat-message-input"
+              ref={composerRef}
+              rows={1}
               value={body}
               onChange={(e) => setBody(e.target.value)}
+              onKeyDown={handleComposerKeyDown}
               onFocus={() => { setComposerFocused(true); onComposerFocus?.() }}
               onBlur={() => { setComposerFocused(false); onComposerBlur?.() }}
               placeholder="Type a message…"
-              className="flex-1 rounded-full bg-surfacealt px-3 sm:px-4 py-2 sm:py-2.5 text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-seal focus:ring-offset-0"
+              enterKeyHint={touchKeyboard ? 'enter' : 'send'}
+              aria-describedby={touchKeyboard ? undefined : 'chat-message-hint'}
+              className="block min-h-11 flex-1 resize-none rounded-3xl bg-surfacealt px-4 py-3 text-sm leading-5 text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-seal focus:ring-offset-0 sm:min-h-12 sm:py-3.5"
             />
+            {!touchKeyboard && <span id="chat-message-hint" className="sr-only">Press Enter to send, Shift and Enter for a new line.</span>}
             <button
               type="submit" disabled={sending || uploadingAttachments}
               aria-label={uploadingAttachments ? 'Uploading attachment' : sending ? 'Sending message' : 'Send message'}
@@ -806,6 +852,42 @@ function MediaLightbox({ media, onClose }) {
   )
 }
 
+// "Today", "Yesterday", "Monday" or "Mon, 16 Nov 2026" above each day's messages.
+function DayDivider({ label }) {
+  return (
+    <div className="flex justify-center py-2" role="separator" aria-label={label}>
+      <span className="rounded-full bg-surfacealt px-3 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">
+        {label}
+      </span>
+    </div>
+  )
+}
+
+// The time under a message or offer ("3:45 PM"). The time comes from the
+// database, so the sender can't change it. Hover shows the full date and
+// time; a tap shows it too, for phones, where there is no hover.
+function MessageTime({ timestamp, align = 'start', children }) {
+  const [showFull, setShowFull] = useState(false)
+  const short = formatMessageTime(timestamp)
+  const full = formatFullTimestamp(timestamp)
+  if (!short) return children ? <div className="mt-0.5 px-1">{children}</div> : null
+
+  return (
+    <div className={`mt-0.5 flex items-center gap-1 px-1 ${align === 'end' ? 'justify-end' : 'justify-start'}`}>
+      <button
+        type="button"
+        onClick={() => setShowFull((value) => !value)}
+        title={full}
+        aria-label={showFull ? `Sent ${full}. Show the time only` : `Sent ${full}`}
+        className="rounded font-mono text-[10px] text-muted transition hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-seal"
+      >
+        <time dateTime={timestamp}>{showFull ? full : short}</time>
+      </button>
+      {children}
+    </div>
+  )
+}
+
 // One chat message. Sent messages are final: there is no edit or delete
 // (migration 0041). Messages edited or deleted before that still show
 // "(edited)" or "This message was deleted", so the history stays honest.
@@ -834,8 +916,8 @@ function MessageBubble({ message, isMine, attachments = [] }) {
   return (
     <>
       <div className={`flex w-full ${isMine ? 'justify-end' : 'justify-start'}`}>
-        <div className={`relative flex max-w-[70%] items-end gap-1.5`}>
-          <div className={`min-w-0 px-4 py-2.5 text-sm leading-relaxed break-words ${
+        <div className={`flex min-w-0 max-w-[70%] flex-col ${isMine ? 'items-end' : 'items-start'}`}>
+          <div className={`min-w-0 max-w-full px-4 py-2.5 text-sm leading-relaxed break-words ${
             isMine 
               ? 'rounded-3xl rounded-br-sm bg-seal text-surface' 
               : 'rounded-3xl rounded-bl-sm bg-surfacealt text-ink'
@@ -894,11 +976,9 @@ function MessageBubble({ message, isMine, attachments = [] }) {
             )}
           </div>
 
-          {isMine && (
-            <div className="flex-shrink-0 pb-0.5">
-              {getStatusDisplay()}
-            </div>
-          )}
+          <MessageTime timestamp={message.created_at} align={isMine ? 'end' : 'start'}>
+            {isMine && getStatusDisplay()}
+          </MessageTime>
         </div>
       </div>
       <MediaLightbox media={lightboxMedia} onClose={() => setLightboxMedia(null)} />
@@ -1076,7 +1156,15 @@ function OfferCard({ offer, isSeller, userId, buyerEmail, sellerPayoutConnected 
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1">
-          <p className="font-mono text-[9px] uppercase tracking-widest text-marigold-deep font-semibold">Offer</p>
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="font-mono text-[9px] uppercase tracking-widest text-marigold-deep font-semibold">Offer</p>
+            {/* When the offer was sent (set by the database), with the full date on hover. */}
+            {offer.created_at && (
+              <time dateTime={offer.created_at} title={formatFullTimestamp(offer.created_at)} className="font-mono text-[10px] text-muted">
+                {formatMessageTime(offer.created_at)}
+              </time>
+            )}
+          </div>
           <p className="mt-2 font-display text-base font-bold text-ink">{offer.item_title}</p>
           {offer.item_description && <p className="mt-1 text-xs text-muted leading-relaxed">{offer.item_description}</p>}
         </div>
