@@ -39,3 +39,18 @@ test('builds initials and presence labels for avatars and status text', () => {
   assert.equal(getPresenceLabel(false, '2024-01-02T12:00:00.000Z', '2024-01-02T12:30:00.000Z'), 'Offline • Last seen 30 mins ago')
   assert.equal(getRelativeTimeLabel('2024-01-02T12:00:00.000Z', '2024-01-02T12:30:00.000Z'), '30 mins ago')
 })
+
+test('Enter sends on a computer; Shift or Alt + Enter starts a new line', async () => {
+  const { shouldSendOnEnter } = await import('./chatUtils.js')
+  assert.equal(shouldSendOnEnter({ key: 'Enter' }), true)
+  assert.equal(shouldSendOnEnter({ key: 'Enter', shiftKey: true }), false)
+  assert.equal(shouldSendOnEnter({ key: 'Enter', altKey: true }), false)
+  assert.equal(shouldSendOnEnter({ key: 'a' }), false)
+})
+
+test('Enter never sends on a touch keyboard or while a word is being composed', async () => {
+  const { shouldSendOnEnter } = await import('./chatUtils.js')
+  assert.equal(shouldSendOnEnter({ key: 'Enter' }, { touchKeyboard: true }), false)
+  assert.equal(shouldSendOnEnter({ key: 'Enter', isComposing: true }), false)
+  assert.equal(shouldSendOnEnter({ key: 'Enter', keyCode: 229 }), false)
+})
