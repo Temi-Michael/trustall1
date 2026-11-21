@@ -61,3 +61,29 @@ export function getNotificationPath(notification) {
 export function getInAppMessagePath(notificationId) {
   return isUuid(notificationId) ? `/?notification=${notificationId}` : '/'
 }
+
+// Chat messages from one conversation share a tag: phones then keep one tile
+// per chat that updates ("3 new messages") instead of one tile per message,
+// and the bell shows one row per chat. Everything else stays one per row.
+// public/sw.js accepts only these two shapes of tag.
+export const CHAT_TAG_PREFIX = 'trustall-chat-'
+
+export function getChatGroupId(notification) {
+  const conversationId = notification?.related_conversation_id
+  return notification?.type === 'new_message' && isUuid(conversationId) ? conversationId.toLowerCase() : null
+}
+
+export function getNotificationTag(notification) {
+  const chatId = getChatGroupId(notification)
+  if (chatId) return `${CHAT_TAG_PREFIX}${chatId}`
+  return isUuid(notification?.id) ? `trustall-${notification.id.toLowerCase()}` : 'trustall-notification'
+}
+
+// The text under the title. A chat message with no text is a photo or video
+// (the app sends nothing else without text), so it says so instead of a
+// vague "new update".
+export function getNotificationBody(notification) {
+  const text = String(notification?.message ?? '').trim()
+  if (text) return text
+  return notification?.type === 'new_message' ? 'Sent a photo or video' : 'You have a new update.'
+}

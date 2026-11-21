@@ -56,6 +56,7 @@ const MARKERS = {
   '0040': ['function', 'get_my_payment_readiness'],
   '0041': ['function', 'keep_sent_messages_unchanged'],
   '0042': ['table', 'user_devices'],
+  '0043': ['realtime', 'message_attachments'],
 }
 // Migrations with nothing unique to check. They are safe to run again, so on a
 // database without history they simply run.

@@ -12,9 +12,15 @@ import {
   getNotificationIcon,
   getNotificationDisplayTitle,
 } from "../lib/notificationUtils";
+import { groupNotifications } from "../lib/notificationFormat.js";
 import { supabase } from "../lib/supabaseClient.js";
 import { SHOW_NOTIFICATION_EVENT, showAppNotification } from "../lib/notifications.js";
-import { isUuid } from "../../supabase/functions/_shared/notificationRoutes.js";
+import {
+  getChatGroupId,
+  getNotificationBody,
+  getNotificationTag,
+  isUuid,
+} from "../../supabase/functions/_shared/notificationRoutes.js";
 
 export function NotificationBell({ userId }) {
   const [open, setOpen] = useState(false);
@@ -27,7 +33,12 @@ export function NotificationBell({ userId }) {
   const senderNamesRef = useRef({});
   const navigate = useNavigate();
   const location = useLocation();
+  const locationRef = useRef(location);
   const [selectedNotification, setSelectedNotification] = useState(null);
+
+  useEffect(() => {
+    locationRef.current = location;
+  }, [location]);
 
   const loadNotifications = useCallback(async () => {
     try {
@@ -58,20 +69,32 @@ export function NotificationBell({ userId }) {
     loadNotifications();
 
     const unsubscribe = subscribeToNotifications(userId, (newNotification) => {
-      console.log("New notification received:", newNotification);
+      // A message in the chat already open on screen has been seen: it's read,
+      // not a new notification.
+      const chatId = getChatGroupId(newNotification);
+      if (
+        chatId
+        && document.visibilityState === "visible"
+        && locationRef.current.pathname.toLowerCase() === `/messages/${chatId}`
+      ) {
+        markNotificationRead(newNotification.id);
+        return;
+      }
+
       setNotifications((prev) => {
         if (prev.some((n) => n.id === newNotification.id)) return prev;
         return [newNotification, ...prev];
       });
       setUnreadCount((prev) => prev + 1);
 
-      // Only while the app is out of view, with the push's tag for this row,
-      // and a tap opens the same page as "View".
+      // Only while the app is out of view, with the push's tag (one tile per
+      // chat), and a tap opens the same page as the bell.
       showAppNotification({
         title: getNotificationDisplayTitle(newNotification, senderNamesRef.current[newNotification.sender_id]),
-        body: newNotification.message || "You have a new notification",
+        body: getNotificationBody(newNotification),
         notificationId: newNotification.id,
         path: getNotificationRoute(newNotification),
+        tag: getNotificationTag(newNotification),
       });
     });
 
@@ -184,15 +207,31 @@ export function NotificationBell({ userId }) {
     }
   }, [unreadCount]);
 
-  async function handleNotificationClick(notification) {
+  // A row with a page (a chat, an order, a dispute) opens it straight away;
+  // the page itself shows everything. Only a row without one (marketing)
+  // opens the full message here.
+  async function handleNotificationClick(group) {
+    const { latest } = group;
+    const conversationId = latest.related_conversation_id;
+    const route = getNotificationRoute(latest);
+
+    // Opening a chat reads all of its notifications (as Messages does).
+    const removed = (n) =>
+      n.id === latest.id
+      || (isUuid(conversationId) && n.related_conversation_id?.toLowerCase() === conversationId.toLowerCase());
+    setNotifications((prev) => prev.filter((n) => !removed(n)));
+
+    if (route) {
+      setOpen(false);
+      navigate(route);
+    } else {
+      setSelectedNotification(latest);
+    }
+
     try {
-      await markNotificationRead(notification.id);
-      if (notification.related_conversation_id) {
-        await markConversationNotificationsRead(userId, notification.related_conversation_id);
-      }
-      setNotifications((prev) => prev.filter((n) => n.id !== notification.id));
-      setUnreadCount((prev) => Math.max(0, prev - 1));
-      setSelectedNotification(notification);
+      await markNotificationRead(latest.id);
+      if (isUuid(conversationId)) await markConversationNotificationsRead(userId, conversationId);
+      setUnreadCount(await getUnreadNotificationCount(userId));
     } catch (err) {
       console.error("Failed to mark notification as read:", err);
     }
@@ -270,13 +309,15 @@ export function NotificationBell({ userId }) {
             ) : notifications.length === 0 ? (
               <div className="px-4 py-6 text-center text-sm text-muted">No notifications yet</div>
             ) : (
-              notifications.map((notification) => {
+              groupNotifications(notifications).map((group) => {
+                const notification = group.latest;
                 const displayTitle = getNotificationDisplayTitle(notification, senderNames[notification.sender_id]);
+                const count = group.items.length;
 
                 return (
                   <button
-                    key={notification.id}
-                    onClick={() => handleNotificationClick(notification)}
+                    key={group.key}
+                    onClick={() => handleNotificationClick(group)}
                     className={`w-full border-b border-hairline px-4 py-3 text-left transition hover:bg-surfacealt ${
                       !notification.read_at ? "bg-blue-50" : ""
                     }`}
@@ -290,10 +331,15 @@ export function NotificationBell({ userId }) {
                           {displayTitle}
                         </p>
                         <p className="text-xs text-muted line-clamp-2 mt-0.5">
-                          {notification.message || notification.body || "You have a new update."}
+                          {getNotificationBody(notification)}
                         </p>
                         <p className="text-xs text-muted mt-1">
                           {formatRelativeTime(notification.created_at)}
+                          {count > 1 && (
+                            <span className="ml-2 rounded-full bg-seal/10 px-2 py-0.5 font-semibold text-seal">
+                              {count} new messages
+                            </span>
+                          )}
                         </p>
                       </div>
                     </div>
@@ -322,32 +368,37 @@ export function NotificationBell({ userId }) {
 
           <div className="mt-4 rounded-xl border border-hairline bg-surfacealt p-3">
             <p className="whitespace-pre-wrap text-sm leading-6 text-ink">
-              {selectedNotification.message || selectedNotification.body || 'No message content was attached to this notification.'}
+              {getNotificationBody(selectedNotification)}
             </p>
           </div>
 
+          {/* Shown for messages without a page of their own (marketing), so
+              one button is enough. View stays for any other type that ends
+              up here. */}
           <div className="mt-4 flex flex-wrap gap-2">
             {getNotificationRoute(selectedNotification) ? (
-              <button
-                onClick={handleNotificationView}
-                className="rounded-full bg-seal px-4 py-2 font-mono text-xs font-semibold text-surface hover:bg-seal-deep"
-              >
-                View
-              </button>
+              <>
+                <button
+                  onClick={handleNotificationView}
+                  className="rounded-full bg-seal px-4 py-2 font-mono text-xs font-semibold text-surface hover:bg-seal-deep"
+                >
+                  View
+                </button>
+                <button
+                  onClick={closeNotificationDetail}
+                  className="rounded-full border border-hairline px-4 py-2 font-mono text-xs text-ink hover:border-marigold-deep hover:text-marigold-deep"
+                >
+                  Cancel
+                </button>
+              </>
             ) : (
               <button
                 onClick={closeNotificationDetail}
                 className="rounded-full bg-seal px-4 py-2 font-mono text-xs font-semibold text-surface hover:bg-seal-deep"
               >
-                Close
+                Got it
               </button>
             )}
-            <button
-              onClick={closeNotificationDetail}
-              className="rounded-full border border-hairline px-4 py-2 font-mono text-xs text-ink hover:border-marigold-deep hover:text-marigold-deep"
-            >
-              Cancel
-            </button>
           </div>
         </div>
       )}

@@ -102,6 +102,10 @@ Deno.serve(async (req) => {
   if (otherSite) return otherSite;
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
+  // Set once the message is known: removes it if it's now an empty message
+  // whose files all failed, so nobody is left with an "unavailable" bubble.
+  let dropEmptyMessage: (() => Promise<boolean>) | null = null;
+
   try {
     const userClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
       global: { headers: { Authorization: req.headers.get("Authorization") || "" } },
@@ -120,7 +124,6 @@ Deno.serve(async (req) => {
     const [, conversationId, , fileName] = match;
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    if (!(await withinRateLimit(admin, `chat-media:${user.id}`, 40, 600))) return json({ error: TOO_MANY_REQUESTS }, 429);
 
     const { data: message } = await admin
       .from("messages")
@@ -131,25 +134,31 @@ Deno.serve(async (req) => {
       return json({ error: "Message not found" }, 404);
     }
 
-    // When this is the last file and nothing got through, drop the empty message.
+    // Only for the last file of the message, only when it has no text and no
+    // file got through. The service role may delete (migration 0041).
+    dropEmptyMessage = async () => {
+      if (!final || String(message!.body || "").trim()) return false;
+      const { count, error: countError } = await admin
+        .from("message_attachments")
+        .select("id", { count: "exact", head: true })
+        .eq("message_id", message!.id);
+      if (countError || count) return false;
+      const { error: deleteError } = await admin.from("messages").delete().eq("id", message!.id);
+      if (deleteError) console.error("screen-chat-image: empty message not removed", deleteError);
+      return !deleteError;
+    };
+
     async function finishBlocked(notice: string) {
       await admin.storage.from(BUCKET).remove([path]);
-      let messageRemoved = false;
-      if (final && !String(message!.body || "").trim()) {
-        const { count } = await admin
-          .from("message_attachments")
-          .select("id", { count: "exact", head: true })
-          .eq("message_id", message!.id);
-        if (!count) {
-          await admin.from("messages").delete().eq("id", message!.id);
-          messageRemoved = true;
-        }
-      }
+      const messageRemoved = await dropEmptyMessage!();
       return json({ blocked: true, message: notice, message_removed: messageRemoved });
     }
 
+    // After the message check, so an empty message isn't left behind.
+    if (!(await withinRateLimit(admin, `chat-media:${user.id}`, 40, 600))) return finishBlocked(TOO_MANY_REQUESTS);
+
     const { data: file, error: downloadError } = await admin.storage.from(BUCKET).download(path);
-    if (downloadError || !file) return json({ error: "Upload not found" }, 404);
+    if (downloadError || !file) return finishBlocked("The photo or video didn't finish uploading. Please send it again.");
 
     const mimeType = file.type || "application/octet-stream";
     const isVideo = mimeType.startsWith("video/");
@@ -167,7 +176,7 @@ Deno.serve(async (req) => {
     const { error: moveError } = await admin.storage.from(BUCKET).move(path, finalPath);
     if (moveError) {
       console.error("screen-chat-image: move failed", moveError);
-      return json({ error: "The file could not be sent. Please try again." }, 500);
+      return finishBlocked("The file could not be sent. Please try again.");
     }
 
     const { data: attachment, error: insertError } = await admin
@@ -178,12 +187,14 @@ Deno.serve(async (req) => {
     if (insertError) {
       console.error("screen-chat-image: attachment insert failed", insertError);
       await admin.storage.from(BUCKET).remove([finalPath]);
-      return json({ error: "The file could not be sent. Please try again." }, 500);
+      const messageRemoved = await dropEmptyMessage();
+      return json({ blocked: true, message: "The file could not be sent. Please try again.", message_removed: messageRemoved });
     }
 
     return json({ blocked: false, attachment });
   } catch (error) {
     console.error("screen-chat-image failed", error);
-    return json({ error: "The file could not be sent. Please try again." }, 500);
+    const messageRemoved = dropEmptyMessage ? await dropEmptyMessage().catch(() => false) : false;
+    return json({ error: "The file could not be sent. Please try again.", message_removed: messageRemoved }, 500);
   }
 });

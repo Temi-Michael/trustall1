@@ -1,7 +1,12 @@
-// v8: pushes are shown once and a tap opens the same page as the bell.
-// The version bump clears caches saved by older rules.
-const CACHE_NAME = 'trustall-v8';
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// v9: one notification tile per chat. The version bump clears caches saved
+// by older rules.
+const CACHE_NAME = 'trustall-v9';
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const UUID_PATTERN = new RegExp(`^${UUID}$`, 'i');
+// The two tag shapes getNotificationTag (notificationRoutes.js) makes.
+const TAG_PATTERN = new RegExp(`^trustall-(chat-)?${UUID}$`, 'i');
+const CHAT_TAG_PREFIX = 'trustall-chat-';
+const GROUP_MEMORY = 50;
 // Same name in src/lib/notifications.js: the bell listens for it.
 const SHOW_NOTIFICATION_MESSAGE = 'trustall:show-notification';
 const ASSETS = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg', '/icon-192.svg', '/icon-512.svg', '/favicon.ico', '/robots.txt'];
@@ -53,6 +58,43 @@ function toSiteUrl(value) {
   return url.origin === self.location.origin ? url.href : home;
 }
 
+function readTag(value, notificationId) {
+  if (typeof value === 'string' && TAG_PATTERN.test(value)) return value.toLowerCase();
+  return notificationId ? `trustall-${notificationId.toLowerCase()}` : 'trustall-notification';
+}
+
+// Same rule as nextChatGroup in src/lib/notificationFormat.js (the open app's
+// pop-ups); keep the two in step. The same notification can arrive twice
+// (push and open app), so it counts once.
+function nextChatGroup(previous, notificationId) {
+  const ids = Array.isArray(previous?.ids) ? previous.ids.filter((id) => typeof id === 'string') : [];
+  const before = Number.isInteger(previous?.count) && previous.count > 0 ? previous.count : (previous ? 1 : 0);
+  if (notificationId && ids.includes(notificationId)) return { count: Math.max(before, 1), ids, repeat: true };
+  return { count: before + 1, ids: notificationId ? [...ids, notificationId].slice(-GROUP_MEMORY) : ids, repeat: false };
+}
+
+// A chat's tile already on screen is replaced by one with the count and the
+// newest text. Always shows something: iPhones stop push for a site whose
+// pushes show nothing.
+async function showTile(title, options) {
+  if (!options.tag.startsWith(CHAT_TAG_PREFIX)) return self.registration.showNotification(title, options);
+
+  let current;
+  try {
+    [current] = await self.registration.getNotifications({ tag: options.tag });
+  } catch {
+    current = undefined;
+  }
+  const group = nextChatGroup(current?.data, options.data.notificationId);
+  return self.registration.showNotification(title, {
+    ...options,
+    body: group.count > 1 ? `${group.count} new messages\n${options.body}` : options.body,
+    // Buzz again for a new message; a repeat replaces the tile quietly.
+    renotify: group.count > 1 && !group.repeat,
+    data: { ...options.data, count: group.count, ids: group.ids },
+  });
+}
+
 // Pushes are data-only (send-push-notification), so this shows each one once.
 // The returned promise keeps the worker alive until it is on screen, which
 // iPhones require of every push.
@@ -68,13 +110,13 @@ firebase.messaging().onBackgroundMessage((payload) => {
     self.registration.setAppBadge(unread).catch(() => {});
   }
 
-  return self.registration.showNotification(String(data.title || 'Trustall').slice(0, 120), {
+  return showTile(String(data.title || 'Trustall').slice(0, 120), {
     body: String(data.body || 'You have a new notification').slice(0, 300),
     icon: '/icon-192.svg',
     badge: '/icon-192.svg',
-    // The open app uses the same tag for the same notification, so a push and
-    // the app's live update replace each other instead of stacking.
-    tag: tap.notificationId ? `trustall-${tap.notificationId}` : 'trustall-notification',
+    // The open app uses the same tag, so a push and the app's live update
+    // replace each other instead of stacking.
+    tag: readTag(data.tag, tap.notificationId),
     data: tap,
   });
 });

@@ -29,6 +29,7 @@ test('a push is data-only, with a full address to the same page the bell opens',
     actionUrl: `https://www.trustall.online/messages/${CONVERSATION}`,
     notificationId: ID,
     inAppOnly: 'false',
+    tag: `trustall-chat-${CONVERSATION}`,
     unreadCount: '3',
   })
   assert.equal(message.webpush.headers.Urgency, 'high')
@@ -58,8 +59,11 @@ test('long text is cut to a preview, never past the Firebase size limit', () => 
 test('missing text gets a default and empty values stay strings', () => {
   const message = buildPushMessage({ id: 'not-a-uuid', type: 'new_message', title: '  ', message: null }, 't')
   assert.equal(message.data.title, 'Trustall')
-  assert.equal(message.data.body, 'You have a new notification')
+  // A chat message without text is a photo or video.
+  assert.equal(message.data.body, 'Sent a photo or video')
   assert.equal(message.data.notificationId, '')
+  assert.equal(message.data.tag, 'trustall-notification')
+  assert.equal(buildPushMessage({ id: ID, type: 'order_confirmed', message: ' ' }, 't').data.body, 'You have a new update.')
   assert.equal(message.data.unreadCount, undefined)
   assert.equal(truncateText('  short  ', 10), 'short')
 })
