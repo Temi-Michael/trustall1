@@ -95,6 +95,8 @@ function GlobalSetup() {
         body: data.body || payload.notification?.body,
         notificationId: data.notificationId,
         path: inAppOnly ? null : sitePathFromUrl(data.actionUrl),
+        // A chat's tag joins its one tile; anything else falls back to the id.
+        tag: data.tag,
       })
     }) : () => {}
 

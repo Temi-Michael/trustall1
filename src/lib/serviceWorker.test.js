@@ -38,6 +38,11 @@ function loadWorker(windows = []) {
     skipWaiting: () => {},
     registration: {
       showNotification: async (title, options) => { shown.push({ title, options }) },
+      // What's on screen for a tag: the last one shown replaced the others.
+      getNotifications: async ({ tag }) => {
+        const last = [...shown].reverse().find((entry) => entry.options.tag === tag)
+        return last ? [{ data: last.options.data }] : []
+      },
       setAppBadge: async () => {},
     },
     clients: {
@@ -173,4 +178,44 @@ test('an id that is not a UUID never reaches the address or the app', async () =
   // Treated as having no id: the home page, which this window already shows.
   assert.deepEqual(open.calls, [['focus']])
   assert.deepEqual(worker.opened, [])
+})
+
+const CHAT_TAG = `trustall-chat-${CONVERSATION}`
+const OTHER_ID = '9f2b8c1e-9a4d-4e7f-b6c5-0d1e2f3a4b5c'
+
+test('messages from one chat share one tile that counts them', async () => {
+  const worker = loadWorker()
+  await worker.push({ data: pushData({ tag: CHAT_TAG }) })
+  await worker.push({ data: pushData({ tag: CHAT_TAG, notificationId: OTHER_ID, body: 'Hello?' }) })
+  assert.equal(worker.shown.length, 2)
+  const [first, second] = worker.shown
+  assert.equal(first.options.tag, CHAT_TAG)
+  assert.equal(first.options.body, 'Is it still available?')
+  assert.equal(first.options.renotify, false)
+  assert.equal(second.options.tag, CHAT_TAG, 'same tag: the second replaces the first')
+  assert.equal(second.options.body, '2 new messages\nHello?')
+  assert.equal(second.options.renotify, true, 'a new message buzzes again')
+  assert.equal(second.options.data.count, 2)
+  // The tap still opens the chat.
+  assert.equal(second.options.data.url, `${SITE}/messages/${CONVERSATION}`)
+})
+
+test('the same notification twice (push and open app) counts once, but still shows', async () => {
+  const worker = loadWorker()
+  await worker.push({ data: pushData({ tag: CHAT_TAG }) })
+  await worker.push({ data: pushData({ tag: CHAT_TAG }) })
+  assert.equal(worker.shown.length, 2, 'iPhones need every push to show something')
+  assert.equal(worker.shown[1].options.data.count, 1)
+  assert.equal(worker.shown[1].options.body, 'Is it still available?')
+  assert.equal(worker.shown[1].options.renotify, false)
+})
+
+test('only Trustall tag shapes are used; anything else falls back to the id', async () => {
+  const worker = loadWorker()
+  for (const tag of ['evil', 'trustall-chat-../../x', `other-${ID}`, 42]) {
+    await worker.push({ data: pushData({ tag }) })
+  }
+  assert.deepEqual(worker.shown.map((entry) => entry.options.tag), Array(4).fill(`trustall-${ID}`))
+  await worker.push({ data: pushData({ tag: CHAT_TAG.toUpperCase() }) })
+  assert.equal(worker.shown.at(-1).options.tag, CHAT_TAG)
 })
