@@ -1,6 +1,6 @@
 // Builds what send-push-notification sends to Firebase, and reads Firebase's
 // errors. Plain JavaScript so Node can test it and Deno can import it.
-import { getInAppMessagePath, getNotificationPath, isUuid } from './notificationRoutes.js'
+import { getInAppMessagePath, getNotificationBody, getNotificationPath, getNotificationTag, isUuid } from './notificationRoutes.js'
 
 export const DEFAULT_SITE_ORIGIN = 'https://www.trustall.online'
 
@@ -41,11 +41,13 @@ export function buildPushMessage(notification, token, { siteOrigin = DEFAULT_SIT
   const inAppOnly = path === null
   const data = {
     title: truncateText(notification.title, TITLE_LIMIT) || 'Trustall',
-    body: truncateText(notification.message, BODY_LIMIT) || 'You have a new notification',
+    body: truncateText(getNotificationBody(notification), BODY_LIMIT),
     // Full address: a tap can open the app from nothing, so the site must be in it.
     actionUrl: new URL(inAppOnly ? getInAppMessagePath(notification.id) : path, siteOrigin).href,
     notificationId: isUuid(notification.id) ? notification.id : '',
     inAppOnly: String(inAppOnly),
+    // One tile per chat on the phone (see getNotificationTag).
+    tag: getNotificationTag(notification),
   }
   if (Number.isInteger(unreadCount) && unreadCount >= 0) data.unreadCount = String(unreadCount)
 

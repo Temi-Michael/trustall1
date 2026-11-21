@@ -8,6 +8,7 @@ import { markConversationRead, subscribeToMessageReadUpdates } from '../lib/read
 import { SealMark } from '../components/Navbar.jsx'
 import { isOnline, formatLastSeen, subscribeToUserPresence } from '../lib/presenceUtils.js'
 import { markConversationNotificationsRead } from '../lib/notificationUtils.js'
+import { closeChatNotifications } from '../lib/notifications.js'
 import { getSupportEmail } from '../lib/authRedirect.js'
 import { usePaymentReadiness } from '../lib/usePaymentReadiness.js'
 import { holdInactivity } from '../lib/deviceSession.js'
@@ -356,11 +357,18 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` }, loadThread)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'offers', filter: `conversation_id=eq.${conversationId}` }, loadThread)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'offers', filter: `conversation_id=eq.${conversationId}` }, loadThread)
+      // A photo or video joins its message a few seconds after the message
+      // itself, once screen-chat-image has checked it. Without this the other
+      // person saw an empty "unavailable" message until they reopened the
+      // chat. The table has no conversation column to filter on, but row
+      // security only sends this user's own chats (live since migration 0043).
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_attachments' }, loadThread)
       .subscribe()
-    
-    // Mark conversation as read when opened
+
+    // Mark conversation as read when opened, and clear its phone notification.
     markConversationRead(conversationId)
     markConversationNotificationsRead(userId, conversationId)
+    closeChatNotifications(conversationId)
 
     // Subscribe to read receipt updates
     const unsubscribeReadUpdates = subscribeToMessageReadUpdates(conversationId, (updatedMessage) => {
@@ -888,6 +896,8 @@ function MessageTime({ timestamp, align = 'start', children }) {
   )
 }
 
+const MEDIA_CHECK_GRACE_MS = 2 * 60 * 1000
+
 // One chat message. Sent messages are final: there is no edit or delete
 // (migration 0041). Messages edited or deleted before that still show
 // "(edited)" or "This message was deleted", so the history stays honest.
@@ -897,7 +907,9 @@ function MessageBubble({ message, isMine, attachments = [] }) {
   const isDeleted = Boolean(message.is_deleted || message.deleted_at)
   // A photo/video message whose file isn't available to show (still being
   // checked, or removed by the check) would otherwise be an empty bubble.
+  // For its first two minutes it is most likely still being checked.
   const hasNothingToShow = !message.body && attachments.length === 0 && !message.pending
+  const mayStillArrive = hasNothingToShow && Date.now() - new Date(message.created_at).getTime() < MEDIA_CHECK_GRACE_MS
 
   const getStatusDisplay = () => {
     if (!isMine) return null
@@ -930,7 +942,9 @@ function MessageBubble({ message, isMine, attachments = [] }) {
                 safety, keep payments inside Trustall checkout.
               </p>
             ) : hasNothingToShow ? (
-              <p className="text-[13px] italic text-current/70">Photo or video unavailable</p>
+              <p className="text-[13px] italic text-current/70">
+                {mayStillArrive ? 'Photo or video on its way…' : 'Photo or video unavailable'}
+              </p>
             ) : (
               <>
                 {message.body && <p className="whitespace-pre-wrap">{message.body}{message.edited_at && <span className="ml-1 text-[10px] opacity-75">(edited)</span>}</p>}

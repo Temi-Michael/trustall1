@@ -1,5 +1,8 @@
 import { supabase } from './supabaseClient.js'
-import { isUuid } from '../../supabase/functions/_shared/notificationRoutes.js'
+import { CHAT_TAG_PREFIX, isUuid } from '../../supabase/functions/_shared/notificationRoutes.js'
+import { nextChatGroup } from './notificationFormat.js'
+
+const CHAT_TAG_PATTERN = new RegExp(`^${CHAT_TAG_PREFIX}[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`, 'i')
 
 // Asks the bell to show one notification's full message. public/sw.js posts
 // it after a tap on a marketing push; a pop-up shown by the app dispatches it.
@@ -52,17 +55,20 @@ function appIsInView() {
  *   replace each other instead of showing twice.
  * path: the page a tap opens; with a notificationId and no path, a tap shows
  *   the full message in the bell (marketing).
+ * tag: a chat's tag (getNotificationTag) joins that chat's one tile, as
+ *   public/sw.js does for pushes. Without a notification, any name.
  */
 export async function showAppNotification({ title, body, notificationId = null, path = null, tag = 'trustall' } = {}) {
   if (!supportsNotifications() || Notification.permission !== 'granted' || appIsInView()) return
 
-  const id = isUuid(notificationId) ? notificationId : null
+  const id = isUuid(notificationId) ? notificationId.toLowerCase() : null
+  const chatTag = typeof tag === 'string' && CHAT_TAG_PATTERN.test(tag) ? tag.toLowerCase() : null
   const inAppOnly = Boolean(id) && !path
   const options = {
     body: body || 'You have a new notification',
     icon: '/icon-192.svg',
     badge: '/icon-192.svg',
-    tag: id ? `trustall-${id}` : tag,
+    tag: chatTag || (id ? `trustall-${id}` : tag),
     data: { url: path, notificationId: id, inAppOnly },
   }
 
@@ -71,6 +77,17 @@ export async function showAppNotification({ title, body, notificationId = null, 
   try {
     const registration = await navigator.serviceWorker?.getRegistration('/')
     if (registration?.active) {
+      if (chatTag && typeof registration.getNotifications === 'function') {
+        const [current] = await registration.getNotifications({ tag: chatTag })
+        const group = nextChatGroup(current?.data, id)
+        // Already on screen (the push got there first).
+        if (group.repeat) return
+        if (group.count > 1) {
+          options.body = `${group.count} new messages\n${options.body}`
+          options.renotify = true
+        }
+        options.data = { ...options.data, count: group.count, ids: group.ids }
+      }
       await registration.showNotification(title || 'Trustall', options)
       return
     }
@@ -88,6 +105,20 @@ export async function showAppNotification({ title, body, notificationId = null, 
     }
   } catch (error) {
     console.warn('Browser notification failed', error)
+  }
+}
+
+// Clears a chat's tile from the phone or computer once the chat is open, so
+// it doesn't linger with messages already read (and its count starts again).
+export async function closeChatNotifications(conversationId) {
+  if (!isUuid(conversationId)) return
+  try {
+    const registration = await navigator.serviceWorker?.getRegistration('/')
+    if (typeof registration?.getNotifications !== 'function') return
+    const tiles = await registration.getNotifications({ tag: `${CHAT_TAG_PREFIX}${conversationId.toLowerCase()}` })
+    tiles.forEach((tile) => tile.close())
+  } catch {
+    // No service worker or no permission: nothing on screen to clear.
   }
 }
 

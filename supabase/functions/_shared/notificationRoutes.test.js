@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { getInAppMessagePath, getNotificationPath, isUuid } from './notificationRoutes.js'
+import { getChatGroupId, getInAppMessagePath, getNotificationBody, getNotificationPath, getNotificationTag, isUuid } from './notificationRoutes.js'
 
 const ID = '3f2b8c1e-9a4d-4e7f-b6c5-0d1e2f3a4b5c'
 
@@ -56,4 +56,27 @@ test('the in-app message link carries only a UUID', () => {
   assert.equal(getInAppMessagePath(undefined), '/')
   assert.equal(isUuid(ID), true)
   assert.equal(isUuid(`${ID}\n`), false)
+})
+
+test('chat messages share one tag per conversation; everything else is one per row', () => {
+  const CHAT = '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d'
+  const message = { id: ID, type: 'new_message', related_conversation_id: CHAT.toUpperCase() }
+  assert.equal(getChatGroupId(message), CHAT)
+  assert.equal(getNotificationTag(message), `trustall-chat-${CHAT}`)
+  assert.equal(getNotificationTag({ ...message, id: 'b'.repeat(8) }), `trustall-chat-${CHAT}`, 'the chat decides, not the row')
+  // An offer in the same chat is its own row and tile.
+  assert.equal(getChatGroupId({ ...message, type: 'offer_received' }), null)
+  assert.equal(getNotificationTag({ ...message, type: 'offer_received' }), `trustall-${ID}`)
+  // Nothing else can get into a tag.
+  assert.equal(getNotificationTag({ type: 'new_message', related_conversation_id: '../x', id: ID }), `trustall-${ID}`)
+  assert.equal(getNotificationTag({ type: 'marketing', id: 'nope' }), 'trustall-notification')
+  assert.equal(getNotificationTag(null), 'trustall-notification')
+})
+
+test('a notification always has text to show', () => {
+  assert.equal(getNotificationBody({ type: 'new_message', message: '  Hello  ' }), 'Hello')
+  assert.equal(getNotificationBody({ type: 'new_message', message: '' }), 'Sent a photo or video')
+  assert.equal(getNotificationBody({ type: 'new_message', message: null }), 'Sent a photo or video')
+  assert.equal(getNotificationBody({ type: 'order_confirmed', message: ' ' }), 'You have a new update.')
+  assert.equal(getNotificationBody(undefined), 'You have a new update.')
 })
