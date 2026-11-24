@@ -13,7 +13,7 @@ import { getSupportEmail } from '../lib/authRedirect.js'
 import { usePaymentReadiness } from '../lib/usePaymentReadiness.js'
 import { holdInactivity } from '../lib/deviceSession.js'
 import { describePaymentRequirement, isPaymentVerificationError, verificationPageLink } from '../lib/paymentReadiness.js'
-import { safeFileName } from '../lib/inputSafety.js'
+import { MAX_FILES_PER_MESSAGE, SEND_FAILED_MESSAGE, createCheckedFiles, isColumnPermissionError, newMessageId, sendMessageWithFiles } from '../lib/chatMedia.js'
 import { hasTouchKeyboard, shouldSendOnEnter } from '../lib/chatUtils.js'
 import { formatConversationTime, formatFullTimestamp, formatMessageTime, groupByDay } from '../lib/messageTime.js'
 import { Paperclip, Send } from 'lucide-react'
@@ -281,8 +281,17 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
   const [attachmentsByMessageId, setAttachmentsByMessageId] = useState({})
   const [selectedFiles, setSelectedFiles] = useState([])
   const [uploadingAttachments, setUploadingAttachments] = useState(false)
-  const [pendingMessages, setPendingMessages] = useState([])
+  // While a message with files sends: which file it's on, e.g. { index: 1, total: 3 }.
+  const [mediaProgress, setMediaProgress] = useState(null)
   const [composerNotice, setComposerNotice] = useState('')
+  // The ID the next message will be saved with. Chosen here, so sending the
+  // same message again after a lost reply can't save a second copy.
+  const draftIdRef = useRef(newMessageId())
+  // Files of the message being written that already passed the photo check.
+  const [checkedFiles] = useState(createCheckedFiles)
+  // Text messages that couldn't be saved, sent again when the connection
+  // returns or on "Tap to retry": [{ id, conversation_id, body }].
+  const unsentRef = useRef([])
   const [threadError, setThreadError] = useState('')
   const listingContextInitialized = useRef(false)
   const messagesRef = useRef(null)
@@ -313,37 +322,82 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
     else sendMessage(event)
   }
 
-  async function retryPendingMessages() {
-    if (!navigator.onLine || pendingMessages.length === 0) return
+  // A new conversation gets a new draft: checked files and the draft ID
+  // belong to the conversation they were made for.
+  useEffect(() => {
+    draftIdRef.current = newMessageId()
+    checkedFiles.clear()
+  }, [conversationId, checkedFiles])
 
-    const retryQueue = [...pendingMessages]
-    for (const item of retryQueue) {
-      if (!item.pending) continue
-      try {
-        const { data: message, error: messageError } = await supabase
-          .from('messages')
-          .insert({ conversation_id: conversationId, sender_id: userId, body: (item.body || '').trim() || '' })
-          .select()
-          .single()
+  // Saves one text message under its own ID. Saving the same ID twice can't
+  // make two messages: the second try reports "already saved" (23505), which
+  // means an earlier try got through and only its reply was lost.
+  async function insertTextMessage(item) {
+    const row = { conversation_id: item.conversation_id, sender_id: userId, body: item.body }
+    const insert = (values) => supabase.from('messages').insert(values).select().single()
+    let { data, error } = await insert({ id: item.id, ...row })
+    if (isColumnPermissionError(error)) ({ data, error } = await insert(row))
+    if (!error) return { status: 'sent', message: data }
+    if (error.code === '23505') return { status: 'sent', message: null }
+    // TC001: refused for contact or bank details (migration 0037).
+    if (error.code === 'TC001') return { status: 'refused', error }
+    return { status: 'failed', error }
+  }
 
-        if (messageError) throw messageError
+  function markUnsent(item, error) {
+    unsentRef.current = [...unsentRef.current.filter((entry) => entry.id !== item.id), item]
+    setItems((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, pending: true, failed: true, error } : entry))
+  }
 
-        setItems((prev) => prev.map((entry) => entry.id === item.tempId ? { ...message, kind: 'message' } : entry))
-        setPendingMessages((prev) => prev.filter((entry) => entry.tempId !== item.tempId))
-      } catch (error) {
-        console.error('Failed to retry pending message:', error)
+  // Sends unsent text messages again: all of them when the connection
+  // returns, or one when its "Tap to retry" is pressed.
+  async function retryUnsentMessages(onlyId = null) {
+    if (!navigator.onLine) return
+    const queue = unsentRef.current.filter((entry) => !onlyId || entry.id === onlyId)
+    let anySent = false
+    for (const item of queue) {
+      setItems((prev) => prev.map((entry) => entry.id === item.id ? { ...entry, failed: false } : entry))
+      const outcome = await insertTextMessage(item)
+      if (outcome.status === 'failed') {
+        console.error('Retrying a message failed:', outcome.error)
+        markUnsent(item, outcome.error.message)
+        continue
       }
+      unsentRef.current = unsentRef.current.filter((entry) => entry.id !== item.id)
+      if (outcome.status === 'refused') {
+        setItems((prev) => prev.filter((entry) => entry.id !== item.id))
+        setBody((current) => current || item.body)
+        setComposerNotice(outcome.error.message)
+        continue
+      }
+      anySent = true
+      setItems((prev) => prev.map((entry) => entry.id === item.id
+        ? { ...(outcome.message || entry), kind: 'message', pending: false, failed: false }
+        : entry))
     }
+    if (anySent) loadThread()
   }
 
   useEffect(() => {
     const handleOnline = () => {
-      if (navigator.onLine) retryPendingMessages()
+      if (navigator.onLine) retryUnsentMessages()
     }
-
     window.addEventListener('online', handleOnline)
     return () => window.removeEventListener('online', handleOnline)
-  }, [pendingMessages, conversationId, userId])
+  }, [conversationId, userId])
+
+  // Closing or reloading the page while photos send stops the upload, so the
+  // browser asks first. (Phones may not ask; the message is then simply not
+  // sent, and nothing half-sent reaches the other person.)
+  useEffect(() => {
+    if (!uploadingAttachments) return undefined
+    const warn = (event) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [uploadingAttachments])
 
   useEffect(() => {
     loadThread()
@@ -523,7 +577,13 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
       ...(messages || []).map((m) => ({ ...m, kind: 'message' })),
       ...(offers || []).map((o) => ({ ...o, kind: 'offer' })),
     ].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
-    setItems(merged)
+    // Messages still sending, or waiting to be sent again, exist only on this
+    // device: keep them in view below the saved ones.
+    setItems((previous) => {
+      const savedIds = new Set(merged.map((item) => item.id))
+      const unsaved = previous.filter((item) => item.pending && item.conversation_id === conversationId && !savedIds.has(item.id))
+      return [...merged, ...unsaved]
+    })
 
     const acceptedOfferIds = (offers || []).filter((o) => o.status === 'accepted').map((o) => o.id)
     if (acceptedOfferIds.length > 0) {
@@ -535,93 +595,123 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
 
   async function sendMessage(e) {
     e.preventDefault()
-    const trimmedBody = body.trim()
-    if (!trimmedBody && selectedFiles.length === 0) return
+    // One message at a time (the button and Enter are also blocked).
+    if (sending || uploadingAttachments) return
+    const text = body.trim()
+    if (!text && selectedFiles.length === 0) return
+    if (selectedFiles.length > 0) await sendWithFiles(text, selectedFiles)
+    else await sendText(text)
+  }
 
-    const tempId = `temp-${Date.now()}-${Math.random().toString(16).slice(2)}`
-    const optimisticMessage = {
-      id: tempId,
-      conversation_id: conversationId,
+  // Text only: shown straight away, saved in the background, and sent again
+  // automatically if the connection drops (never twice: see insertTextMessage).
+  async function sendText(text) {
+    const item = { id: draftIdRef.current, conversation_id: conversationId, body: text }
+    draftIdRef.current = newMessageId()
+    setItems((prev) => [...prev, {
+      ...item,
       sender_id: userId,
-      body: trimmedBody || '',
       created_at: new Date().toISOString(),
       kind: 'message',
       pending: true,
       failed: false,
-      tempId,
       read_at: null,
       delivered_at: null,
-    }
+    }])
+    setBody('')
+    setComposerNotice('')
 
     if (!navigator.onLine) {
-      setItems((prev) => [...prev, { ...optimisticMessage, failed: true, error: 'You are offline. Reconnect and try sending again.' }])
-      setPendingMessages((prev) => [...prev, { tempId, body: trimmedBody, created_at: optimisticMessage.created_at, pending: true }])
+      markUnsent(item, 'You are offline. It will be sent when you reconnect.')
       return
     }
 
-    const filesToSend = selectedFiles
-    setItems((prev) => [...prev, optimisticMessage])
-    setPendingMessages((prev) => [...prev, { tempId, body: trimmedBody, created_at: optimisticMessage.created_at, pending: true }])
-    setBody('')
-    setSelectedFiles([])
-    setComposerNotice('')
     setSending(true)
-    setUploadingAttachments(filesToSend.length > 0)
     try {
-      const { data: message, error: messageError } = await supabase
-        .from('messages')
-        .insert({ conversation_id: conversationId, sender_id: userId, body: trimmedBody || '' })
-        .select()
-        .single()
-
-      // TC001: the database refused contact or bank details (migration 0037).
-      // Nothing was saved, so give the text back to edit.
-      if (messageError?.code === 'TC001') {
-        setItems((prev) => prev.filter((entry) => entry.id !== tempId))
-        setPendingMessages((prev) => prev.filter((entry) => entry.tempId !== tempId))
-        setBody(trimmedBody)
-        setSelectedFiles(filesToSend)
-        setComposerNotice(messageError.message)
+      const outcome = await insertTextMessage(item)
+      if (outcome.status === 'refused') {
+        // Nothing was saved: give the text back to edit.
+        setItems((prev) => prev.filter((entry) => entry.id !== item.id))
+        setBody((current) => current || text)
+        setComposerNotice(outcome.error.message)
         return
       }
-      if (messageError) throw messageError
-
-      // Each file goes to the sender's holding folder; screen-chat-image checks
-      // it and only then makes it visible in the conversation.
-      let messageRemoved = false
-      for (const [index, file] of filesToSend.entries()) {
-        const fileName = `${Date.now()}_${index}_${safeFileName(file.name)}`
-        const pendingPath = `${conversationId}/pending/${userId}/${fileName}`
-        const { error: uploadError } = await supabase.storage.from('message-attachments').upload(pendingPath, file, { upsert: true })
-        if (uploadError) throw uploadError
-
-        const { data: screening, error: screeningError } = await supabase.functions.invoke('screen-chat-image', {
-          body: { message_id: message.id, path: pendingPath, final: index === filesToSend.length - 1 },
-        })
-        if (screeningError) {
-          console.error('Chat media screening failed:', screeningError)
-          setComposerNotice('A photo couldn’t be checked right now, so it wasn’t sent. Please try again.')
-        } else if (screening?.blocked) {
-          setComposerNotice(screening.message)
-          messageRemoved = messageRemoved || Boolean(screening.message_removed)
-        }
+      if (outcome.status === 'failed') {
+        console.error('Failed to send message:', outcome.error)
+        markUnsent(item, outcome.error.message)
+        return
       }
-
-      if (messageRemoved) {
-        setItems((prev) => prev.filter((entry) => entry.id !== tempId))
-      } else {
-        setItems((prev) => prev.map((entry) => entry.id === tempId ? { ...message, kind: 'message', pending: false, failed: false } : entry))
-      }
-      setPendingMessages((prev) => prev.filter((entry) => entry.tempId !== tempId))
+      setItems((prev) => prev.map((entry) => entry.id === item.id
+        ? { ...(outcome.message || entry), kind: 'message', pending: false, failed: false }
+        : entry))
       await loadThread()
-    } catch (error) {
-      console.error('Failed to send message:', error)
-      setItems((prev) => prev.map((entry) => entry.id === tempId ? { ...entry, pending: true, failed: true, error: error.message } : entry))
-      setPendingMessages((prev) => prev.map((entry) => entry.tempId === tempId ? { ...entry, pending: true, failed: true, error: error.message } : entry))
     } finally {
       setSending(false)
-      setUploadingAttachments(false)
     }
+  }
+
+  // With photos or videos: every file is uploaded and checked first, then the
+  // message and its files are saved together (src/lib/chatMedia.js). The box
+  // keeps the text and files until that has happened, so nothing is lost if
+  // the connection drops, and nothing half-sent reaches the other person if
+  // the sender leaves part way through.
+  async function sendWithFiles(text, files) {
+    if (!navigator.onLine) {
+      setComposerNotice("You're offline. Your message is still here; send it when you're back online.")
+      return
+    }
+
+    const holdReason = `chat-media:${conversationId}`
+    // Uploads can take a while on mobile data with nothing being tapped.
+    holdInactivity(holdReason, true)
+    setSending(true)
+    setUploadingAttachments(true)
+    setComposerNotice('')
+    setMediaProgress({ index: 0, total: files.length })
+    try {
+      const result = await sendMessageWithFiles({
+        client: supabase,
+        conversationId,
+        userId,
+        messageId: draftIdRef.current,
+        text,
+        files,
+        checked: checkedFiles,
+        onProgress: (index, total) => setMediaProgress({ index, total }),
+      })
+      if (result.status === 'sent') {
+        draftIdRef.current = newMessageId()
+        setBody('')
+        setSelectedFiles([])
+        // e.g. one photo of several was refused for showing a phone number.
+        setComposerNotice(result.notices[0] || '')
+        await loadThread()
+        return
+      }
+      // Not sent: the text and files stay, except files that can never be sent.
+      if (result.blockedFiles.length > 0) {
+        setSelectedFiles((current) => current.filter((file) => !result.blockedFiles.includes(file)))
+      }
+      setComposerNotice(result.notice)
+    } catch (error) {
+      console.error('Failed to send message:', error)
+      setComposerNotice(SEND_FAILED_MESSAGE)
+    } finally {
+      holdInactivity(holdReason, false)
+      setSending(false)
+      setUploadingAttachments(false)
+      setMediaProgress(null)
+    }
+  }
+
+  // A new choice of files replaces the old one (at most MAX_FILES_PER_MESSAGE).
+  function chooseFiles(fileList) {
+    const files = Array.from(fileList || [])
+    checkedFiles.clear()
+    setSelectedFiles(files.slice(0, MAX_FILES_PER_MESSAGE))
+    setComposerNotice(files.length > MAX_FILES_PER_MESSAGE
+      ? `You can send up to ${MAX_FILES_PER_MESSAGE} photos or videos in one message. The first ${MAX_FILES_PER_MESSAGE} are ready to send.`
+      : '')
   }
 
   if (threadError && !conversation) {
@@ -752,6 +842,7 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
               message={item}
               isMine={item.sender_id === userId}
               attachments={attachmentsByMessageId[item.id] || []}
+              onRetry={item.failed ? () => retryUnsentMessages(item.id) : undefined}
             />
           )
         })}
@@ -766,21 +857,51 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
         >
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <input
-                id="chat-attachment-input"
+              id="chat-attachment-input"
               type="file"
               accept="image/*,video/*"
               multiple
-              onChange={(event) => setSelectedFiles(Array.from(event.target.files || []))}
-                className="sr-only"
+              disabled={uploadingAttachments}
+              onChange={(event) => {
+                chooseFiles(event.target.files)
+                // Lets the same file be chosen again after it's removed.
+                event.target.value = ''
+              }}
+              className="sr-only"
             />
-              <label htmlFor="chat-attachment-input" title="Attach photos or videos" className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border border-hairline text-muted transition hover:border-seal hover:text-seal">
-                <Paperclip size={18} aria-hidden="true" />
-                <span className="sr-only">Choose files</span>
-              </label>
+            <label
+              htmlFor="chat-attachment-input"
+              title="Attach photos or videos"
+              aria-disabled={uploadingAttachments}
+              className={`flex h-10 w-10 items-center justify-center rounded-full border border-hairline text-muted transition ${uploadingAttachments ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:border-seal hover:text-seal'}`}
+            >
+              <Paperclip size={18} aria-hidden="true" />
+              <span className="sr-only">Choose files</span>
+            </label>
             {selectedFiles.length > 0 && (
-                <span className="max-w-[55vw] truncate text-[10px] text-seal">{selectedFiles.length} file{selectedFiles.length === 1 ? '' : 's'} selected</span>
+              <>
+                <span className="max-w-[45vw] truncate text-[10px] text-seal">{selectedFiles.length} file{selectedFiles.length === 1 ? '' : 's'} selected</span>
+                {!uploadingAttachments && (
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedFiles([]); checkedFiles.clear() }}
+                    className="rounded-full px-2 py-1 text-[10px] font-semibold text-muted hover:bg-surfacealt hover:text-ink"
+                  >
+                    Remove
+                  </button>
+                )}
+              </>
             )}
           </div>
+          {mediaProgress && (
+            // Says to stay: closing the app before the upload ends means nothing is sent.
+            <p role="status" className="mb-2 rounded-xl bg-seal/10 px-3 py-2 text-xs leading-relaxed text-seal">
+              {mediaProgress.total === 1
+                ? 'Sending your photo or video…'
+                : `Sending ${Math.min(mediaProgress.index + 1, mediaProgress.total)} of ${mediaProgress.total} photos or videos…`}
+              {' '}Keep Trustall open until it's sent.
+            </p>
+          )}
           {composerNotice && (
             <p role="alert" className="mb-2 rounded-xl bg-marigold/10 px-3 py-2 text-xs leading-relaxed text-marigold-deep">
               {composerNotice}
@@ -794,6 +915,8 @@ function Thread({ conversationId, userId, userEmail, listingId, isMobileFullscre
               rows={1}
               value={body}
               onChange={(e) => setBody(e.target.value)}
+              // While photos send, the box shows exactly what's being sent.
+              readOnly={uploadingAttachments}
               onKeyDown={handleComposerKeyDown}
               onFocus={() => { setComposerFocused(true); onComposerFocus?.() }}
               onBlur={() => { setComposerFocused(false); onComposerBlur?.() }}
@@ -901,7 +1024,8 @@ const MEDIA_CHECK_GRACE_MS = 2 * 60 * 1000
 // One chat message. Sent messages are final: there is no edit or delete
 // (migration 0041). Messages edited or deleted before that still show
 // "(edited)" or "This message was deleted", so the history stays honest.
-function MessageBubble({ message, isMine, attachments = [] }) {
+// onRetry: given for my own message that couldn't be saved yet.
+function MessageBubble({ message, isMine, attachments = [], onRetry }) {
   const [lightboxMedia, setLightboxMedia] = useState(null)
 
   const isDeleted = Boolean(message.is_deleted || message.deleted_at)
@@ -951,6 +1075,15 @@ function MessageBubble({ message, isMine, attachments = [] }) {
                 {message.pending && isMine && (
                   <p className="mt-1 text-[10px] uppercase tracking-[0.2em] text-amber-700/80">
                     {message.failed ? 'Not sent yet' : 'Sending…'}
+                    {message.failed && onRetry && (
+                      <button
+                        type="button"
+                        onClick={onRetry}
+                        className="ml-2 rounded-full bg-white/90 px-2 py-0.5 font-semibold normal-case tracking-normal text-seal hover:bg-white"
+                      >
+                        Tap to retry
+                      </button>
+                    )}
                   </p>
                 )}
                 {attachments.length > 0 && (
