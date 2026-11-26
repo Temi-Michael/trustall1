@@ -2,7 +2,8 @@
 // in Messages.jsx). Upload and check every file first, then save the message
 // and its files in one server call, so leaving part way through never leaves a
 // half-sent message for the other person. The rules for where files go are in
-// supabase/functions/_shared/chatMedia.js.
+// supabase/functions/_shared/chatMedia.js; the server side is the
+// screen-chat-image function (its "check" and "send" actions).
 import { safeFileName } from './inputSafety.js'
 import {
   MAX_FILES_PER_MESSAGE,
