@@ -169,3 +169,43 @@ test('after a successful send the remembered checks are cleared', async () => {
   await sendMessageWithFiles(opts)
   assert.equal(opts.checked.size, 0)
 })
+
+test('a sent message says where each of its files is stored, so the sender can keep showing its own copy', async () => {
+  const files = [file('a.jpg'), file('b.jpg')]
+  const result = await sendMessageWithFiles(options(fakeClient(), { files }))
+  assert.equal(result.status, 'sent')
+  assert.equal(result.sentFiles.length, 2)
+  assert.equal(result.sentFiles[0].file, files[0])
+  assert.equal(result.sentFiles[1].file, files[1])
+  for (const { fileUrl } of result.sentFiles) {
+    assert.match(fileUrl, new RegExp(`^${CONVO}/[^/]+$`))
+  }
+  assert.notEqual(result.sentFiles[0].fileUrl, result.sentFiles[1].fileUrl)
+})
+
+test('a refused photo is not among the sent files', async () => {
+  const files = [file('a.jpg'), file('phone.jpg')]
+  const client = fakeClient({
+    check: (body) => body.path.includes('phone')
+      ? { data: { status: 'blocked', message: 'Contact details' } }
+      : { data: { status: 'clean', path: body.path.replace('/pending/', '/checked-') } },
+  })
+  const result = await sendMessageWithFiles(options(client, { files }))
+  assert.equal(result.status, 'sent')
+  assert.deepEqual(result.sentFiles.map((entry) => entry.file), [files[0]])
+})
+
+test('photo links are reused until 5 minutes before they stop working', async () => {
+  const { createSignedUrlCache } = await import('./chatMedia.js')
+  let clock = 0
+  const cache = createSignedUrlCache({ lifetimeSeconds: 3600, now: () => clock })
+  assert.equal(cache.get('c/a.jpg'), null)
+  cache.set('c/a.jpg', 'https://example.test/a?token=1')
+  clock = 54 * 60 * 1000
+  assert.equal(cache.get('c/a.jpg'), 'https://example.test/a?token=1')
+  clock = 55 * 60 * 1000
+  assert.equal(cache.get('c/a.jpg'), null)
+  // Once dropped, it stays dropped until a new link is stored.
+  clock = 0
+  assert.equal(cache.get('c/a.jpg'), null)
+})

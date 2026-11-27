@@ -12,16 +12,6 @@ export async function markConversationRead(conversationId) {
   }
 }
 
-export function getMessageReadStatus(message) {
-  if (!message.read_at && !message.delivered_at) {
-    return { status: "sending", icon: "⏱️" };
-  }
-  if (!message.read_at) {
-    return { status: "delivered", icon: "✓" };
-  }
-  return { status: "seen", icon: "✓✓" };
-}
-
 export function subscribeToMessageReadUpdates(conversationId, callback) {
   const channel = supabase
     .channel(`messages-read-${conversationId}`)
