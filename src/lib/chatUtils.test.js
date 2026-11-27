@@ -54,3 +54,13 @@ test('Enter never sends on a touch keyboard or while a word is being composed', 
   assert.equal(shouldSendOnEnter({ key: 'Enter', isComposing: true }), false)
   assert.equal(shouldSendOnEnter({ key: 'Enter', keyCode: 229 }), false)
 })
+
+test('my message shows a clock while sending, one tick once saved, two once read', async () => {
+  const { messageStatus } = await import('./chatUtils.js')
+  assert.equal(messageStatus({ pending: true }), 'sending')
+  assert.equal(messageStatus({ pending: true, failed: true }), 'not_sent')
+  // Saved but not read yet: "sent", never a clock (there is no delivered step).
+  assert.equal(messageStatus({ id: 'm1', read_at: null }), 'sent')
+  assert.equal(messageStatus({ id: 'm1' }), 'sent')
+  assert.equal(messageStatus({ id: 'm1', read_at: '2026-11-26T20:00:00Z' }), 'read')
+})

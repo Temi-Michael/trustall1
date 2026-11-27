@@ -76,3 +76,19 @@ export function hasTouchKeyboard() {
     && typeof window.matchMedia === 'function'
     && window.matchMedia('(pointer: coarse)').matches
 }
+
+/**
+ * The mark next to my own message:
+ * - 'sending': on its way (a clock)
+ * - 'not_sent': couldn't be saved yet; "Tap to retry"
+ * - 'sent': saved, the other person can see it (one tick)
+ * - 'read': the other person opened the chat since (two ticks)
+ * There is no "delivered" step: the database only records when a message
+ * was saved and when it was read.
+ */
+export function messageStatus(message) {
+  if (message?.failed) return 'not_sent'
+  if (message?.pending) return 'sending'
+  if (message?.read_at) return 'read'
+  return 'sent'
+}

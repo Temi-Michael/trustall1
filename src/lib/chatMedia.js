@@ -8,6 +8,7 @@ import { safeFileName } from './inputSafety.js'
 import {
   MAX_FILES_PER_MESSAGE,
   SEND_FAILED_MESSAGE,
+  finalPathFor,
   isColumnPermissionError,
   pendingPathFor,
 } from '../../supabase/functions/_shared/chatMedia.js'
@@ -62,16 +63,19 @@ export function createCheckedFiles() {
  * @param {(index: number, total: number) => void} [options.onProgress]
  * @param {() => number} [options.now]
  * @returns {Promise<
- *   | { status: 'sent', message: object, attachments: object[], notices: string[], blockedFiles: File[] }
+ *   | { status: 'sent', message: object, attachments: object[], sentFiles: Array<{ file: File, fileUrl: string }>, notices: string[], blockedFiles: File[] }
  *   | { status: 'not_sent', reason: 'failed' | 'blocked' | 'contact_details', notice: string, blockedFiles: File[] }
  * >}
- *   not_sent keeps the text and files in the message box, except blockedFiles
- *   (files that can never be sent, such as one showing a phone number).
+ *   sentFiles pairs each file that went out with its place in storage (the
+ *   attachment's file_url), so the sender's screen can keep showing its own
+ *   copy instead of downloading it again.
+ *   not_sent: nothing was saved. blockedFiles are files that can never be
+ *   sent, such as one showing a phone number.
  */
 export async function sendMessageWithFiles({ client, conversationId, userId, messageId, text, files, checked, onProgress, now = Date.now }) {
   const notices = []
   const blockedFiles = []
-  const checkedPaths = []
+  const checkedFiles = []
   const notSent = (reason, notice) => ({ status: 'not_sent', reason, notice, blockedFiles })
 
   if (files.length > MAX_FILES_PER_MESSAGE) {
@@ -103,8 +107,9 @@ export async function sendMessageWithFiles({ client, conversationId, userId, mes
       path = data.path
       checked.set(file, conversationId, path)
     }
-    checkedPaths.push(path)
+    checkedFiles.push({ file, path })
   }
+  const checkedPaths = checkedFiles.map((entry) => entry.path)
 
   // Every file was refused and there's no text: nothing to send.
   if (!text && checkedPaths.length === 0) return notSent('blocked', notices[0] || CHECK_FAILED_MESSAGE)
@@ -124,7 +129,34 @@ export async function sendMessageWithFiles({ client, conversationId, userId, mes
   }
 
   checked.clear()
-  return { status: 'sent', message: data.message, attachments: data.attachments || [], notices, blockedFiles }
+  // The server keeps each file's name when it moves it into the conversation.
+  const sentFiles = checkedFiles.map(({ file, path }) => ({ file, fileUrl: finalPathFor(conversationId, path.split('/').pop()) }))
+  return { status: 'sent', message: data.message, attachments: data.attachments || [], sentFiles, notices, blockedFiles }
+}
+
+/**
+ * Remembers signed links to chat photos while they're still good, so
+ * refreshing the conversation doesn't give every photo a new link. A new link
+ * makes the browser download the photo again, and it blinks on screen.
+ * A link is reused until 5 minutes before it stops working.
+ */
+export function createSignedUrlCache({ lifetimeSeconds, now = Date.now }) {
+  const entries = new Map()
+  const reuseForMs = (lifetimeSeconds - 5 * 60) * 1000
+  return {
+    get(path) {
+      const entry = entries.get(path)
+      if (!entry) return null
+      if (now() - entry.createdAt >= reuseForMs) {
+        entries.delete(path)
+        return null
+      }
+      return entry.url
+    },
+    set(path, url) {
+      entries.set(path, { url, createdAt: now() })
+    },
+  }
 }
 
 /** A new message ID. Chosen in the browser so a repeat send is recognised. */
